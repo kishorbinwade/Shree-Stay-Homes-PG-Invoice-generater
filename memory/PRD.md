@@ -48,6 +48,8 @@ Production-ready PG Billing & Invoice Generator for "SHREE STAY HOMES & PG" (PG 
 
 - Gmail SMTP became the ONLY email path (managed proxy removed entirely). Fixed two real bugs found via a local aiosmtpd sink: (1) `starttls(context)` positional → `starttls(context=context)` (the reported crash); (2) single-line HTML template exceeded RFC5321 998-char line limit → SMTPDataError "Line too long" — fixed with `MIMEText(html, "html", "utf-8")` (base64 CTE). Verified end-to-end against the sink: owner+tenant messages received with byte-identical PDF attachments; auth/connection errors map to clear messages (smtp_error_message); SMTP_TLS flag added for local testing; 503 with clear detail when SMTP not configured. scripts/test_smtp_server.py kept as a reusable local test harness.
 
+- SMTP fix committed as c3fee10; testing agent iteration_4 passed 100% (starttls keyword fix, utf-8 MIMEText, 503-when-unconfigured, error mapping, invoice-save-unaffected-by-email-failure, zero pageerrors). Push to GitHub pending user action via Emergent Save → Save to GitHub (pod holds no git credentials).
+
 ## Backlog / Next Tasks
 - P0: none blocking.
 - P1: Verify PDF visual layout edge cases (very long tenant names/addresses) with document render check; silence recharts ResponsiveContainer width(-1) warning on first mount.
