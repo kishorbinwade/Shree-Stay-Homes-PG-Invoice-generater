@@ -56,6 +56,9 @@ def test_email_owner_only(api):
     d = r.json()
     assert d.get("owner") == "sent", d
     assert d.get("tenant") in ("skipped", None)
+    # attachment flag must be present and boolean; false when SMTP not configured
+    assert "attachment" in d, d
+    assert isinstance(d["attachment"], bool)
 
 
 def test_email_owner_and_tenant(api):

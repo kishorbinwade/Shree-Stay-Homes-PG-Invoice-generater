@@ -4,7 +4,27 @@ A complete, **offline-first**, **privacy-first** PG billing & invoicing applicat
 
 Create invoices → automatic billing calculations in ₹ INR → watermarked A4 PDF → download / print → email to owner (and optionally tenant) → invoice history → backup & restore.
 
-> **Local-first by design:** all invoices, tenants and settings live in the browser's **IndexedDB on the owner's device** — never in a cloud database. The app works **offline** for everything except sending emails. No public hosting required.
+> **MongoDB is not required. Billing and tenant data are stored locally in IndexedDB.** The app is 100% local: the React frontend + browser IndexedDB hold all invoices, tenants, settings and history. The small FastAPI backend exists **only** for secure email delivery — it stores nothing.
+
+---
+
+## Architecture
+
+```
+Linux Computer
+      │
+      ├── React frontend  (http://localhost:3000)
+      │      │
+      │      └── IndexedDB  →  invoices / tenants / settings / history
+      │
+      └── FastAPI  (http://localhost:8001)
+             │
+             └── Internet
+                   │
+                   └── Email service (managed proxy, or your Gmail SMTP)
+```
+
+No cloud database. No public hosting required. Works offline for everything except sending email.
 
 ---
 
@@ -14,7 +34,7 @@ Create invoices → automatic billing calculations in ₹ INR → watermarked A4
 - **Create Invoice** — tenant details, room/bed, check-in/out, itemized charges (rent, deposit, electricity, food, maintenance, other, discount, previous balance); instant Subtotal → Discount → Total → Paid → Balance; auto payment status (Paid / Partially Paid / Pending); advance-payment guard
 - **Sequential invoice numbers** — `SHPG-2026-0001`, `SHPG-2026-0002`, … auto-generated, never duplicated, sequence survives restarts
 - **Watermarked PDF** — professional A4 invoice (logo, address, GSTIN, itemized charges, payment details, authorized signature) with an embedded diagonal `SHREE STAY HOMES & PG` watermark and footer on every page; multi-page support; ₹ glyph embedded in the PDF font
-- **Email invoices** — PDF automatically emailed to the owner (default `shreehomestaypg@gmail.com`); optional tenant copy via checkbox; per-recipient status (Sent / Failed / not provided) with retry; resend anytime from History
+- **Email invoices** — PDF emailed to the owner (default `shreehomestaypg@gmail.com`); optional tenant copy via checkbox; per-recipient status (Sent / Failed / not provided) with retry; resend anytime from History
 - **Invoice History** — search (tenant / invoice no), filter by month & payment status, sort by date; view, download, print, resend email, duplicate, edit (keeps the same number), delete with confirmation
 - **Tenants** — auto-built from invoices with billed/pending aggregates; one-click prefilled new invoice
 - **Settings** — business name, address, mobile, email, GSTIN, logo & signature upload, owner email, email toggles, invoice prefix & starting number, default terms/notes, watermark text
@@ -30,8 +50,8 @@ Create invoices → automatic billing calculations in ₹ INR → watermarked A4
 | Frontend | React 19, Tailwind CSS, shadcn/ui, recharts, framer-motion |
 | Local DB | IndexedDB via `idb` (stores: invoices, tenants, settings, sequences) |
 | PDF | jsPDF + jspdf-autotable (embedded subset font with ₹ glyph) |
-| Backend | FastAPI (email delivery only) |
-| Email | Managed email proxy (Resend) — key stays server-side only |
+| Backend | FastAPI (email delivery only — no database) |
+| Email | Managed email proxy, or your own Gmail SMTP for PDF attachments |
 
 ---
 
@@ -41,6 +61,7 @@ Create invoices → automatic billing calculations in ₹ INR → watermarked A4
 
 - **Python 3.10+** with venv support (`sudo apt install python3 python3-venv`)
 - **Node.js 18+** and **yarn** (`npm install -g yarn`) — or npm
+- **MongoDB is NOT required** — there is no database to install
 
 ### Option A — One command
 
@@ -97,9 +118,27 @@ yarn start                # or: npm start  →  http://localhost:3000
 | `EMERGENT_EMAIL_KEY` | Managed email delivery key — **server-side only, never exposed to the browser** |
 | `EMAIL_FROM_NAME` | Sender display name (`Shree Stay Homes & PG`) |
 | `EMAIL_REPLY_TO` | Reply-to inbox (default `shreehomestaypg@gmail.com`) |
-| `MONGO_URL` / `DB_NAME` | Not used for billing data (privacy); backend starts fine even without MongoDB running |
+| `CORS_ORIGINS` | Allowed frontend origin (`http://localhost:3000` locally) |
+| `SMTP_HOST` / `SMTP_PORT` | Gmail SMTP server (`smtp.gmail.com` / `587`) |
+| `SMTP_USER` | Your Gmail address (e.g. `shreehomestaypg@gmail.com`) |
+| `SMTP_APP_PASSWORD` | Gmail **App Password** — see below |
 
-> **Email note:** sending invoice emails requires an internet connection and a valid email key. Without it, everything else works — the UI shows "Email failed" with a **Retry Email** button, and PDF download/print is unaffected.
+### Email & PDF attachments
+
+The **managed email proxy** sends invoice summary emails instantly but **does not support file attachments**. To have the **invoice PDF attached** to emails, configure **Gmail SMTP**:
+
+1. On the Google account `shreehomestaypg@gmail.com`, turn on **2-Step Verification**: https://myaccount.google.com/security
+2. Create an **App Password**: https://myaccount.google.com/apppasswords (name it e.g. "PG Billing")
+3. Put it in `backend/.env`:
+   ```
+   SMTP_USER=shreehomestaypg@gmail.com
+   SMTP_APP_PASSWORD=xxxx xxxx xxxx xxxx
+   ```
+4. Restart the backend.
+
+When SMTP is configured it is used automatically (real PDF attached). Otherwise the managed proxy sends the email **without** the PDF and the app shows a warning — invoice creation, PDF download and printing are never affected. The App Password stays only in `backend/.env` on your computer — never in the browser, IndexedDB, or git.
+
+> **Email note:** sending email requires internet. Without connectivity (or credentials), everything else works — the UI shows "Email failed" with a **Retry Email** button.
 
 ---
 
@@ -107,8 +146,8 @@ yarn start                # or: npm start  →  http://localhost:3000
 
 ```
 ├── backend/
-│   ├── server.py            # FastAPI — POST /api/email/invoice (only external call)
-│   ├── requirements.txt
+│   ├── server.py            # FastAPI — POST /api/email/invoice (email only, no DB)
+│   ├── requirements.txt     # fastapi, uvicorn, httpx, pydantic — that's all
 │   └── .env.example
 ├── frontend/
 │   ├── public/
@@ -131,13 +170,14 @@ yarn start                # or: npm start  →  http://localhost:3000
 
 1. Owner fills tenant details + charges → totals update instantly (₹ INR formatting)
 2. **Generate Invoice** → unique number assigned → saved to IndexedDB → watermarked PDF built in the browser
-3. PDF automatically emailed to the owner; tenant copy if the checkbox is ticked
+3. PDF emailed to the owner; tenant copy if the checkbox is ticked
 4. Owner can **Download** / **Print** the PDF anytime — fully offline
 5. Everything is searchable in **Invoice History**; export JSON/CSV backups from **Backup & Restore**
 
 ## Security & Privacy
 
 - No authentication needed — it's a single-owner local app
-- No credentials, API keys or passwords in frontend code or browser storage
-- Tenant data is never uploaded anywhere; it leaves the device only as an invoice email attachment when the owner explicitly sends it
+- No credentials, API keys or passwords in frontend code or browser storage; `.env` is git-ignored, only `.env.example` templates are committed
+- Tenant data is never uploaded anywhere; it leaves the device only as an invoice email when the owner explicitly sends it
+- No billing data is sent to or stored by the backend — it only relays the email
 - Form validation, negative-amount prevention, duplicate-invoice-number protection, and confirmation dialogs for destructive actions

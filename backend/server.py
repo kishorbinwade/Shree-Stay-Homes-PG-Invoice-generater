@@ -1,7 +1,6 @@
 from fastapi import FastAPI, APIRouter, HTTPException
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
-from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import re
 import ipaddress
@@ -12,14 +11,18 @@ from urllib.parse import urlparse
 from pathlib import Path
 from typing import Optional
 from pydantic import BaseModel, EmailStr
+import asyncio
+import base64
+import smtplib
+import ssl
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.application import MIMEApplication
+from email.utils import formataddr
 import httpx
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
-
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
 
 app = FastAPI()
 api_router = APIRouter(prefix="/api")
@@ -31,6 +34,14 @@ EMAIL_BASE_URL = "https://integrations.emergentagent.com"
 EMAIL_KEY = os.environ.get("EMERGENT_EMAIL_KEY", "")
 EMAIL_FROM_NAME = os.environ.get("EMAIL_FROM_NAME", "Shree Stay Homes & PG")
 EMAIL_REPLY_TO = os.environ.get("EMAIL_REPLY_TO")
+
+# Optional Gmail SMTP — when configured, invoices are sent with the real PDF
+# attachment. The managed email proxy does not support attachments.
+SMTP_HOST = os.environ.get("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
+SMTP_USER = os.environ.get("SMTP_USER", "")
+SMTP_APP_PASSWORD = os.environ.get("SMTP_APP_PASSWORD", "")
+SMTP_CONFIGURED = bool(SMTP_USER and SMTP_APP_PASSWORD)
 
 # ---- Guardrail gate (structural defense for email safety) ----
 _SHORTENERS = ("bit.ly", "tinyurl.com", "t.co", "is.gd", "cutt.ly", "goo.gl", "rebrand.ly")
@@ -164,25 +175,56 @@ def invoice_email_html(d: InvoiceEmailRequest) -> str:
     )
 
 
-async def send_invoice_email(to: str, subject: str, html: str, pdf_b64: str, filename: str):
+async def send_invoice_email(to: str, subject: str, html: str, pdf_b64: str, filename: str) -> bool:
+    """Send one invoice email. Returns True if the PDF was actually attached."""
     _assert_safe_email(subject, html)
+    if SMTP_CONFIGURED:
+        await send_smtp_email(to, subject, html, pdf_b64, filename)
+        return True
     payload = {
         "to": [to],
         "subject": subject,
         "html": html,
         "from_name": EMAIL_FROM_NAME,
-        "attachments": [{"filename": filename, "content": pdf_b64}],
+        "attachments": [{"filename": filename, "content": pdf_b64, "content_type": "application/pdf"}],
     }
     if EMAIL_REPLY_TO:
         payload["contact_email"] = EMAIL_REPLY_TO
-    async with httpx.AsyncClient(timeout=30) as client_http:
+    async with httpx.AsyncClient(timeout=60) as client_http:
         resp = await client_http.post(
             f"{EMAIL_BASE_URL}/api/v1/email/send",
             headers={"X-Email-Key": EMAIL_KEY},
             json=payload,
         )
+    if resp.status_code >= 400:
+        logger.error(f"Email proxy error {resp.status_code}: {resp.text[:500]}")
     resp.raise_for_status()
-    return resp.json().get("id")
+    return False  # managed proxy silently drops attachments
+
+
+def _send_smtp_sync(to: str, subject: str, html: str, pdf_bytes: bytes, filename: str) -> None:
+    msg = MIMEMultipart("mixed")
+    msg["From"] = formataddr((EMAIL_FROM_NAME, SMTP_USER))
+    msg["To"] = to
+    msg["Subject"] = subject
+    if EMAIL_REPLY_TO:
+        msg["Reply-To"] = EMAIL_REPLY_TO
+    msg.attach(MIMEText(html, "html"))
+    part = MIMEApplication(pdf_bytes, _subtype="pdf")
+    part.add_header("Content-Disposition", "attachment", filename=filename)
+    msg.attach(part)
+    context = ssl.create_default_context()
+    with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=30) as server:
+        server.ehlo()
+        server.starttls(context)
+        server.ehlo()
+        server.login(SMTP_USER, SMTP_APP_PASSWORD)
+        server.sendmail(SMTP_USER, [to], msg.as_string())
+
+
+async def send_smtp_email(to: str, subject: str, html: str, pdf_b64: str, filename: str) -> None:
+    pdf_bytes = base64.b64decode(pdf_b64)
+    await asyncio.to_thread(_send_smtp_sync, to, subject, html, pdf_bytes, filename)
 
 
 @api_router.get("/")
@@ -192,14 +234,16 @@ async def root():
 
 @api_router.post("/email/invoice")
 async def email_invoice(payload: InvoiceEmailRequest):
-    if not EMAIL_KEY:
+    if not EMAIL_KEY and not SMTP_CONFIGURED:
         raise HTTPException(status_code=500, detail="Email service is not configured")
     if len(payload.pdfBase64) > 14_000_000:
         raise HTTPException(status_code=413, detail="PDF attachment too large")
     filename = re.sub(r"[^A-Za-z0-9_.-]", "_", payload.pdfFilename) or "invoice.pdf"
+    if not filename.lower().endswith(".pdf"):
+        filename += ".pdf"
     subject = re.sub(r"[\r\n]+", " ", f"PG Invoice {payload.invoiceNumber} - {payload.tenantName}")[:150]
     body = invoice_email_html(payload)
-    result = {"owner": "failed", "tenant": "skipped", "errors": {}}
+    result = {"owner": "failed", "tenant": "skipped", "errors": {}, "attachment": SMTP_CONFIGURED}
     try:
         await send_invoice_email(str(payload.ownerEmail), subject, body, payload.pdfBase64, filename)
         result["owner"] = "sent"
@@ -225,12 +269,7 @@ app.include_router(api_router)
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
+    allow_origins=os.environ.get('CORS_ORIGINS', 'http://localhost:3000').split(','),
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-@app.on_event("shutdown")
-async def shutdown_db_client():
-    client.close()

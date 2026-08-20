@@ -1,0 +1,33 @@
+{
+  "summary": "Regression + bug-fix verification for MongoDB removal and PDF-attachment flag. Backend has NO MongoDB code, no MONGO_URL/DB_NAME in .env or .env.example, requirements.txt is minimal (no pymongo/motor). POST /api/email/invoice now returns {owner, tenant, errors, attachment}; with SMTP not configured, attachment=false and owner='sent' (verified). Frontend generate flow: invoice SHPG-2026-NNNN created, saved to IndexedDB, persisted across reload, appears in /history with resend action, /backup exports JSON. Warning toast 'Email sent WITHOUT PDF attachment — configure Gmail SMTP in backend/.env to attach PDFs' displays after successful send. All 6 sidebar routes render without pageerror. Backend pytest: 7/7 tests pass when managed-proxy rate limits allow; occasional 429 from the shared managed proxy causes intermittent 'owner failed' on back-to-back sends — env condition, not code.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/email/invoice", "issue": "Managed email proxy returns 429 (Rate limited) under repeat load, causing owner:'failed'. Expected behaviour — surfaces correctly to UI (Retry Email). Not a code bug."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/backend_test.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": [
+    "OPTIONAL: supervisor still starts a local mongod process (leftover env service). Backend no longer uses it, but user asked for 'no MongoDB process'. Consider disabling the mongodb supervisor entry for full compliance.",
+    "OPTIONAL: consider client-side spacing between owner and tenant email sends (small delay) to reduce chances of hitting managed-proxy 429 during back-to-back requests."
+  ],
+  "critical_code_review_comments": [
+    "server.py is a single 275-line file — acceptable for this MVP but consider splitting email HTML template and SMTP helpers into modules if it grows.",
+    "attachment flag in response is derived only from SMTP_CONFIGURED at request start — accurate for current architecture.",
+    "CORS_ORIGINS defaults to '*' in .env; fine for local-first app but tighten before production.",
+    "PDF size guard (14MB) is a good defensive check."
+  ],
+  "updated_files": ["/app/backend/tests/backend_test.py"],
+  "success_rate": {"backend": "100% (7/7 when proxy not rate-limited; 6/7 during rate-limit windows)", "frontend": "100% of tested flows"},
+  "test_credentials": "N/A (local-first app, no auth). Tenant email test used delivered@resend.dev.",
+  "seed_data_creation": "Created two throwaway invoices via UI (SHPG-2026-0001 x2 in separate browser contexts) — IndexedDB is per-context so no shared state pollution.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend has no DB — only /api/ (health) and /api/email/invoice. Response now includes 'attachment' boolean. If SMTP creds get configured (SMTP_USER + SMTP_APP_PASSWORD in backend/.env), attachment must flip to true. Managed proxy is rate-limited; if tests fail with owner:'failed', wait 2–3 minutes and re-run the failing test only. Frontend IndexedDB is per browser context, so invoice numbers restart at SHPG-YYYY-0001 in a fresh context.",
+  "rca of the issue": "Original bug: managed email proxy silently drops the 'attachments' field so recipients never received the PDF. Fix implemented by main agent adds Gmail SMTP fallback (send_smtp_email/_send_smtp_sync) that sends multipart/mixed with a real MIMEApplication PDF part; when SMTP is not configured, backend keeps using the managed proxy but returns attachment:false so the UI shows a clear warning toast. Verified end-to-end: response shape correct, warning toast rendered, success flow uninterrupted."
+}

@@ -38,6 +38,12 @@ Production-ready PG Billing & Invoice Generator for "SHREE STAY HOMES & PG" (PG 
 
 - GitHub-ready README.md: features, tech stack table, one-command + manual local run steps, config tables, project structure, security/privacy notes.
 
+## Implemented (2026-08-20, MongoDB removal + email attachment fix)
+- MongoDB fully removed: server.py has no motor/pymongo/MONGO_URL/DB_NAME; requirements.txt minimized (fastapi, uvicorn, httpx, python-dotenv, pydantic, email-validator); backend/.env and .env.example contain only email/CORS/SMTP keys; .gitignore ignores .env* but commits .env.example (`!.env.example`). Backend verified to import/start with no Mongo env or process.
+- Email attachment bug root cause: managed proxy silently drops `attachments` (invalid base64 still 202). Fix: Gmail SMTP path (SMTP_USER/SMTP_APP_PASSWORD in backend/.env, stdlib smtplib + STARTTLS, PDF attached via MIMEApplication, run in asyncio.to_thread) used when configured; managed proxy otherwise with response `attachment:false`; frontend shows a warning toast when an email goes without the PDF. SMTP not configured in this pod (needs user's Gmail App Password).
+
+- Stopped the leftover `mongod` supervisor process; backend + frontend + email all verified working with no MongoDB running. Testing agent iteration_2: all flows pass (7/7 backend tests; only env-level note is managed-proxy 429 rate limiting under rapid repeated sends, surfaced correctly via Retry Email).
+
 ## Backlog / Next Tasks
 - P0: none blocking.
 - P1: Verify PDF visual layout edge cases (very long tenant names/addresses) with document render check; silence recharts ResponsiveContainer width(-1) warning on first mount.
