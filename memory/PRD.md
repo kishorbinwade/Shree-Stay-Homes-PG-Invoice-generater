@@ -36,6 +36,8 @@ Production-ready PG Billing & Invoice Generator for "SHREE STAY HOMES & PG" (PG 
 ## Implemented (2026-08-20, continued)
 - Local/self-hosted readiness: `.env.example` templates (backend + frontend), `scripts/run-local.sh` one-command Linux startup (venv + uvicorn :8001, yarn start :3000), `REACT_APP_BACKEND_URL` falls back to `http://localhost:8001` when unset, README with full local setup guide. App runs fully on localhost without public hosting; email is the only internet-dependent feature and fails gracefully with Retry.
 
+- GitHub-ready README.md: features, tech stack table, one-command + manual local run steps, config tables, project structure, security/privacy notes.
+
 ## Backlog / Next Tasks
 - P0: none blocking.
 - P1: Verify PDF visual layout edge cases (very long tenant names/addresses) with document render check; silence recharts ResponsiveContainer width(-1) warning on first mount.

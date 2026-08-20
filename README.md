@@ -1,85 +1,143 @@
 # Shree Stay Homes & PG — Billing & Invoice Generator
 
-A complete, offline-first PG billing application for **SHREE STAY HOMES & PG** (PG Accommodation & Stay Services).
+A complete, **offline-first**, **privacy-first** PG billing & invoicing application for **SHREE STAY HOMES & PG** (PG Accommodation & Stay Services).
 
-Create invoices → automatic billing calculations (₹ INR) → watermarked A4 PDF → download/print → emailed to the owner (and optionally the tenant) → stored in Invoice History → backup/restore.
+Create invoices → automatic billing calculations in ₹ INR → watermarked A4 PDF → download / print → email to owner (and optionally tenant) → invoice history → backup & restore.
 
-## Privacy-first, local-first
+> **Local-first by design:** all invoices, tenants and settings live in the browser's **IndexedDB on the owner's device** — never in a cloud database. The app works **offline** for everything except sending emails. No public hosting required.
 
-- All invoices, tenants and settings are stored in the **browser's IndexedDB on the owner's device** — never in a cloud database.
-- Works **offline** for everything except sending email (create/edit invoices, calculations, history, PDF generation, download, print).
-- The backend is used **only** for delivering invoice emails.
+---
 
-## Run locally on Linux (no public hosting required)
+## Features
+
+- **Dashboard** — total invoices, total billed, collected, pending; current-month collection & pending; 6-month billed-vs-collected chart; recent invoices
+- **Create Invoice** — tenant details, room/bed, check-in/out, itemized charges (rent, deposit, electricity, food, maintenance, other, discount, previous balance); instant Subtotal → Discount → Total → Paid → Balance; auto payment status (Paid / Partially Paid / Pending); advance-payment guard
+- **Sequential invoice numbers** — `SHPG-2026-0001`, `SHPG-2026-0002`, … auto-generated, never duplicated, sequence survives restarts
+- **Watermarked PDF** — professional A4 invoice (logo, address, GSTIN, itemized charges, payment details, authorized signature) with an embedded diagonal `SHREE STAY HOMES & PG` watermark and footer on every page; multi-page support; ₹ glyph embedded in the PDF font
+- **Email invoices** — PDF automatically emailed to the owner (default `shreehomestaypg@gmail.com`); optional tenant copy via checkbox; per-recipient status (Sent / Failed / not provided) with retry; resend anytime from History
+- **Invoice History** — search (tenant / invoice no), filter by month & payment status, sort by date; view, download, print, resend email, duplicate, edit (keeps the same number), delete with confirmation
+- **Tenants** — auto-built from invoices with billed/pending aggregates; one-click prefilled new invoice
+- **Settings** — business name, address, mobile, email, GSTIN, logo & signature upload, owner email, email toggles, invoice prefix & starting number, default terms/notes, watermark text
+- **Backup & Restore** — export all data as JSON, invoices as CSV; import/merge a backup on another device; Delete All Local Data behind a strong confirmation dialog
+- **PWA / Offline** — installable app shell, service-worker caching, offline indicator; works offline for everything except email
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
+|---|---|
+| Frontend | React 19, Tailwind CSS, shadcn/ui, recharts, framer-motion |
+| Local DB | IndexedDB via `idb` (stores: invoices, tenants, settings, sequences) |
+| PDF | jsPDF + jspdf-autotable (embedded subset font with ₹ glyph) |
+| Backend | FastAPI (email delivery only) |
+| Email | Managed email proxy (Resend) — key stays server-side only |
+
+---
+
+## Run Locally (Linux)
 
 ### Prerequisites
-- Python 3.10+ with `python3-venv`
-- Node.js 18+ and yarn (or npm)
 
-### Quick start
+- **Python 3.10+** with venv support (`sudo apt install python3 python3-venv`)
+- **Node.js 18+** and **yarn** (`npm install -g yarn`) — or npm
+
+### Option A — One command
 
 ```bash
+git clone <your-repo-url> shree-stay-pg
+cd shree-stay-pg
 ./scripts/run-local.sh
 ```
 
 Then open **http://localhost:3000**
 
-The script creates `.env` files from the provided templates on first run, installs dependencies, starts the API on port **8001** and the web app on port **3000**. Stop with `Ctrl+C`.
+The script automatically:
+1. Creates `backend/.env` and `frontend/.env` from the `.env.example` templates (first run only)
+2. Creates a Python virtual environment and installs backend dependencies
+3. Starts the FastAPI email API on **port 8001**
+4. Installs frontend dependencies and starts the React app on **port 3000**
 
-### Manual start (alternative)
+Stop everything with `Ctrl+C`.
 
+### Option B — Manual (two terminals)
+
+**Terminal 1 — backend:**
 ```bash
-# Backend (terminal 1)
 cd backend
 cp .env.example .env
-python3 -m venv .venv && source .venv/bin/activate
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn server:app --host 0.0.0.0 --port 8001
-
-# Frontend (terminal 2)
-cd frontend
-cp .env.example .env        # points REACT_APP_BACKEND_URL to http://localhost:8001
-yarn install
-yarn start                  # serves http://localhost:3000
 ```
+
+**Terminal 2 — frontend:**
+```bash
+cd frontend
+cp .env.example .env      # points REACT_APP_BACKEND_URL to http://localhost:8001
+yarn install              # or: npm install
+yarn start                # or: npm start  →  http://localhost:3000
+```
+
+---
 
 ## Configuration
 
 ### `frontend/.env`
+
 | Key | Purpose | Local value |
 |---|---|---|
-| `REACT_APP_BACKEND_URL` | Where the email API lives | `http://localhost:8001` |
+| `REACT_APP_BACKEND_URL` | Where the email API is reachable | `http://localhost:8001` |
 
 ### `backend/.env`
+
 | Key | Purpose |
 |---|---|
-| `EMERGENT_EMAIL_KEY` | Managed email delivery key (keep the value shipped in the deployed `.env`; email needs internet) |
-| `EMAIL_FROM_NAME` | Sender display name: `Shree Stay Homes & PG` |
+| `EMERGENT_EMAIL_KEY` | Managed email delivery key — **server-side only, never exposed to the browser** |
+| `EMAIL_FROM_NAME` | Sender display name (`Shree Stay Homes & PG`) |
 | `EMAIL_REPLY_TO` | Reply-to inbox (default `shreehomestaypg@gmail.com`) |
-| `MONGO_URL` / `DB_NAME` | Not used for billing data (privacy); the backend starts fine even if MongoDB is not running |
+| `MONGO_URL` / `DB_NAME` | Not used for billing data (privacy); backend starts fine even without MongoDB running |
 
-**Email note:** invoice emails are sent through a managed email proxy and require an internet connection. Without it (or without a key), everything else works — the app shows "Email failed" with a **Retry Email** button, and PDF download/print is unaffected.
+> **Email note:** sending invoice emails requires an internet connection and a valid email key. Without it, everything else works — the UI shows "Email failed" with a **Retry Email** button, and PDF download/print is unaffected.
 
-## Features
+---
 
-- **Dashboard** — total invoices, billed, collected, pending; current-month collection/pending; 6-month billed-vs-collected chart; recent invoices.
-- **Create Invoice** — invoice/tenant/charges/payment sections; instant Subtotal → Discount → Total → Paid → Balance; auto payment status (Paid / Partially Paid / Pending); full validation (mobile, email, dates, negatives, advance-payment guard); sequential invoice numbers (`SHPG-2026-0001`, …) that never repeat and survive restarts.
-- **PDF** — professional A4 invoice with logo, address, GSTIN, itemized charges, payment details, authorized signature; embedded diagonal `SHREE STAY HOMES & PG` watermark and footer on every page; multi-page support; filename `ShreeStayHomesPG_Invoice_<number>.pdf`.
-- **Email** — owner receives every invoice PDF automatically; optional tenant copy via checkbox; per-recipient status (Sent / Failed / Tenant email not provided) with retry.
-- **Invoice History** — search by tenant/invoice no, filter by month/status, sort by date; view, download, print, resend email, duplicate, edit (keeps the same invoice number), delete with confirmation.
-- **Tenants** — auto-built from invoices with billed/pending aggregates; one-click new invoice prefilled for a tenant.
-- **Settings** — business name/address/mobile/email/GSTIN, logo & signature upload, owner email, email toggles, invoice prefix & starting number, default terms/notes, watermark text. Stored locally.
-- **Backup & Restore** — export everything as JSON, invoices as CSV; import/merge a JSON backup on another device; Delete All Local Data behind a strong confirmation dialog.
-- **Offline/PWA** — installable app shell, service-worker caching, offline indicator.
-
-## Tech stack
-
-React 19 · Tailwind CSS · shadcn/ui · IndexedDB (`idb`) · jsPDF (embedded font with ₹ glyph) · FastAPI · managed email proxy (Resend)
-
-## Project structure
+## Project Structure
 
 ```
-backend/    FastAPI email API (server.py), requirements.txt, .env(.example)
-frontend/   React app (src/pages, src/lib, src/components), PWA (public/sw.js, manifest.json)
-scripts/    run-local.sh — one-command Linux startup
+├── backend/
+│   ├── server.py            # FastAPI — POST /api/email/invoice (only external call)
+│   ├── requirements.txt
+│   └── .env.example
+├── frontend/
+│   ├── public/
+│   │   ├── sw.js            # service worker (offline shell)
+│   │   ├── manifest.json    # PWA manifest
+│   │   └── icons/
+│   ├── src/
+│   │   ├── pages/           # Dashboard, CreateInvoice, History, Tenants, Settings, Backup
+│   │   ├── components/      # Layout (sidebar), InvoicePreview, shadcn ui/
+│   │   ├── lib/             # db.js (IndexedDB), pdf.js, api.js, backup.js, format.js
+│   │   ├── context/         # SettingsContext
+│   │   └── fonts/           # subset TTF embedded in PDFs (₹ support)
+│   └── .env.example
+├── scripts/
+│   └── run-local.sh         # one-command Linux startup
+└── README.md
 ```
+
+## How It Works
+
+1. Owner fills tenant details + charges → totals update instantly (₹ INR formatting)
+2. **Generate Invoice** → unique number assigned → saved to IndexedDB → watermarked PDF built in the browser
+3. PDF automatically emailed to the owner; tenant copy if the checkbox is ticked
+4. Owner can **Download** / **Print** the PDF anytime — fully offline
+5. Everything is searchable in **Invoice History**; export JSON/CSV backups from **Backup & Restore**
+
+## Security & Privacy
+
+- No authentication needed — it's a single-owner local app
+- No credentials, API keys or passwords in frontend code or browser storage
+- Tenant data is never uploaded anywhere; it leaves the device only as an invoice email attachment when the owner explicitly sends it
+- Form validation, negative-amount prevention, duplicate-invoice-number protection, and confirmation dialogs for destructive actions
