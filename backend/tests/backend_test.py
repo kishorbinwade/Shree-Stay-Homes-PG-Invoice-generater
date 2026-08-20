@@ -1,4 +1,11 @@
-"""Backend API tests for Shree Stay Homes & PG Billing app."""
+"""Backend API tests for Shree Stay Homes & PG Billing app.
+
+Email delivery uses Gmail SMTP only. When SMTP_USER / SMTP_APP_PASSWORD are not
+configured in backend/.env, POST /api/email/invoice must return 503 and the
+frontend shows "Email failed" with a Retry button — invoice/PDF flows are
+unaffected. When credentials ARE configured, set the OWNER_EMAIL env var to a
+real inbox before running the live-send test.
+"""
 import base64
 import os
 import pytest
@@ -16,19 +23,22 @@ _MIN_PDF = base64.b64encode(
 ).decode()
 
 
+def _smtp_configured() -> bool:
+    try:
+        r = requests.post(f"{BASE_URL}/api/email/invoice", json=_payload(), timeout=30)
+        return r.status_code != 503
+    except Exception:
+        return False
+
+
+SMTP_CONFIGURED = _smtp_configured()
+
+
 @pytest.fixture(scope="module")
 def api():
     s = requests.Session()
     s.headers.update({"Content-Type": "application/json"})
     return s
-
-
-# Health check
-def test_root(api):
-    r = api.get(f"{BASE_URL}/api/")
-    assert r.status_code == 200
-    d = r.json()
-    assert d.get("status") == "ok"
 
 
 def _payload(**overrides):
@@ -40,7 +50,7 @@ def _payload(**overrides):
         "amountPaid": 5000.0,
         "balanceDue": 0.0,
         "paymentStatus": "Paid",
-        "ownerEmail": "delivered@resend.dev",
+        "ownerEmail": "shreehomestaypg@gmail.com",
         "sendToTenant": False,
         "pdfBase64": _MIN_PDF,
         "pdfFilename": "ShreeStayHomesPG_Invoice_SHPG-2026-9999.pdf",
@@ -49,32 +59,11 @@ def _payload(**overrides):
     return p
 
 
-# Email invoice endpoint tests
-def test_email_owner_only(api):
-    r = api.post(f"{BASE_URL}/api/email/invoice", json=_payload())
-    assert r.status_code == 200, r.text
-    d = r.json()
-    assert d.get("owner") == "sent", d
-    assert d.get("tenant") in ("skipped", None)
-    # attachment flag must be present and boolean; false when SMTP not configured
-    assert "attachment" in d, d
-    assert isinstance(d["attachment"], bool)
-
-
-def test_email_owner_and_tenant(api):
-    r = api.post(f"{BASE_URL}/api/email/invoice", json=_payload(
-        sendToTenant=True, tenantEmail="delivered@resend.dev"))
-    assert r.status_code == 200, r.text
-    d = r.json()
-    assert d.get("owner") == "sent"
-    assert d.get("tenant") == "sent"
-
-
-def test_email_send_to_tenant_no_email(api):
-    r = api.post(f"{BASE_URL}/api/email/invoice", json=_payload(sendToTenant=True))
+# Health check — backend must work with no database at all
+def test_root(api):
+    r = api.get(f"{BASE_URL}/api/")
     assert r.status_code == 200
-    d = r.json()
-    assert d.get("tenant") == "no-email"
+    assert r.json().get("status") == "ok"
 
 
 def test_email_invalid_owner_email_422(api):
@@ -83,11 +72,44 @@ def test_email_invalid_owner_email_422(api):
 
 
 def test_email_invalid_tenant_email_422(api):
-    r = api.post(f"{BASE_URL}/api/email/invoice", json=_payload(
-        sendToTenant=True, tenantEmail="bad"))
+    r = api.post(f"{BASE_URL}/api/email/invoice", json=_payload(sendToTenant=True, tenantEmail="bad"))
     assert r.status_code == 422
 
 
 def test_email_missing_required_422(api):
     r = api.post(f"{BASE_URL}/api/email/invoice", json={"invoiceNumber": "X"})
     assert r.status_code == 422
+
+
+@pytest.mark.skipif(SMTP_CONFIGURED, reason="SMTP is configured — 503 path not applicable")
+def test_email_503_when_smtp_not_configured(api):
+    r = api.post(f"{BASE_URL}/api/email/invoice", json=_payload())
+    assert r.status_code == 503
+    assert "SMTP" in r.json().get("detail", "")
+
+
+@pytest.mark.skipif(not SMTP_CONFIGURED, reason="SMTP not configured in backend/.env")
+def test_email_owner_only_smtp(api):
+    r = api.post(f"{BASE_URL}/api/email/invoice", json=_payload())
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d.get("owner") == "sent", d
+    assert d.get("attachment") is True
+    assert d.get("tenant") in ("skipped", None)
+
+
+@pytest.mark.skipif(not SMTP_CONFIGURED, reason="SMTP not configured in backend/.env")
+def test_email_owner_and_tenant_smtp(api):
+    r = api.post(f"{BASE_URL}/api/email/invoice", json=_payload(
+        sendToTenant=True, tenantEmail="shreehomestaypg@gmail.com"))
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d.get("owner") == "sent"
+    assert d.get("tenant") == "sent"
+
+
+@pytest.mark.skipif(not SMTP_CONFIGURED, reason="SMTP not configured in backend/.env")
+def test_email_send_to_tenant_no_email(api):
+    r = api.post(f"{BASE_URL}/api/email/invoice", json=_payload(sendToTenant=True))
+    assert r.status_code == 200
+    assert r.json().get("tenant") == "no-email"

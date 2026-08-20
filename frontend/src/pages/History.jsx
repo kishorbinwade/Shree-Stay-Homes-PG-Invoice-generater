@@ -71,11 +71,8 @@ export default function History() {
     try {
       const res = await deliverInvoiceEmail({ ...inv, sendToTenant: !!inv.sendToTenant }, settings);
       await putInvoice({ ...inv, emailStatus: { owner: res.owner, tenant: res.tenant, at: new Date().toISOString() }, updatedAt: new Date().toISOString() });
-      if (res.owner === 'sent') toast.success(`Resent to owner (${settings.ownerEmail})`);
-      else toast.error('Resend failed');
-      if (res.owner === 'sent' && res.attachment === false) {
-        toast.warning('Sent without PDF attachment — configure Gmail SMTP in backend/.env to attach PDFs');
-      }
+      if (res.owner === 'sent') toast.success(`Resent to owner (${settings.ownerEmail}) with PDF attached`);
+      else toast.error(res.errors?.owner || 'Resend failed');
       if (res.tenant === 'sent') toast.success('Copy sent to tenant');
       reload();
     } catch (e) {

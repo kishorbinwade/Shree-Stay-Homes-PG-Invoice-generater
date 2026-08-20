@@ -46,6 +46,8 @@ Production-ready PG Billing & Invoice Generator for "SHREE STAY HOMES & PG" (PG 
 
 - Git fix (commit 2848fae): backend/.env.example + frontend/.env.example committed; .gitignore ignores real .env but tracks .env.example (`!.env.example`); no secrets in history (testing agent iteration_3 verified: fresh-clone cp steps work, ls-tree shows only the two example files, ek_ key absent from history). Push to GitHub (github.com/kishorbinwade/Shree-Stay-Homes-PG-Invoice-generater) must be done by the user via Emergent UI: Save → Save to GitHub (pod has no git credentials; origin remote already added).
 
+- Gmail SMTP became the ONLY email path (managed proxy removed entirely). Fixed two real bugs found via a local aiosmtpd sink: (1) `starttls(context)` positional → `starttls(context=context)` (the reported crash); (2) single-line HTML template exceeded RFC5321 998-char line limit → SMTPDataError "Line too long" — fixed with `MIMEText(html, "html", "utf-8")` (base64 CTE). Verified end-to-end against the sink: owner+tenant messages received with byte-identical PDF attachments; auth/connection errors map to clear messages (smtp_error_message); SMTP_TLS flag added for local testing; 503 with clear detail when SMTP not configured. scripts/test_smtp_server.py kept as a reusable local test harness.
+
 ## Backlog / Next Tasks
 - P0: none blocking.
 - P1: Verify PDF visual layout edge cases (very long tenant names/addresses) with document render check; silence recharts ResponsiveContainer width(-1) warning on first mount.

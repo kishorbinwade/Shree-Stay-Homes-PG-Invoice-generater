@@ -1,0 +1,19 @@
+{
+  "summary": "Iteration 4 SMTP bug-fix regression testing. Verified server.py fixes (starttls(context=context) keyword call at line 197, MIMEText(html,'html','utf-8') at line 189, SMTP_TLS flag at line 41). Confirmed NO references to integrations.emergentagent.com / EMERGENT_EMAIL_KEY / httpx in backend. Backend pytest: 5 passed, 3 skipped. API endpoints validated: GET /api/ returns {status:'ok'}, POST /api/email/invoice with valid payload returns 503 with actionable SMTP config detail, invalid ownerEmail returns 422 with clear pydantic email validation error, missing fields returns 422. Frontend E2E on preview URL: create-invoice flow succeeds, invoice persists in IndexedDB and shows in /history, email-status-owner shows 'Failed' with Retry Email button visible, 503 toast surfaced with SMTP mention. Resend from history triggered same error path without crash. No pageerrors on /dashboard, /history, /tenants, /settings, /backup, /invoices/new. Backup JSON export downloads (ShreeStayHomesPG_Backup_2026-08-20.json). PDF download from history row triggered download-invoice-SHPG-2026-0001 button producing byte-matched filename ShreeStayHomesPG_Invoice_SHPG-2026-0001.pdf.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": ["/app/backend/tests/backend_test.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "smtp_error_message branch order correctly puts SMTPResponseException/SMTPAuthenticationError/SMTPServerDisconnected before OSError (smtplib.SMTPException is an OSError subclass).",
+    "MIMEText with explicit 'utf-8' charset ensures base64 CTE, avoiding RFC5321 998-char line limit issue for the single-line HTML template.",
+    "503 detail message is user-actionable — names both env vars (SMTP_USER, SMTP_APP_PASSWORD).",
+    "Email failure does not affect invoice save — verified: invoice appears in /history despite 503."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "seed_data_creation": "Created 1 test invoice SHPG-2026-0001 in IndexedDB via UI to validate persistence and PDF download filename convention.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "SMTP is intentionally unconfigured in this pod (empty SMTP_USER/SMTP_APP_PASSWORD in backend/.env). Endpoint returns 503 by design. Live-delivery path already verified by main agent against local aiosmtpd sink (/app/scripts/test_smtp_server.py port 1025 password 'secret'). Do NOT set real Gmail creds. Backend pytest tests/backend_test.py has 3 live-SMTP tests that skip when SMTP is unconfigured — this is expected behavior."
+}

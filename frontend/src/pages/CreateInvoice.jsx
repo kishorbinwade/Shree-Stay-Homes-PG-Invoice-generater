@@ -155,11 +155,8 @@ export default function CreateInvoice() {
       };
       await putInvoice(updated);
       setResult(updated);
-      if (res.owner === 'sent') toast.success(`Invoice emailed to owner (${settings.ownerEmail})`);
-      else toast.error('Owner email failed — use Retry Email');
-      if (res.owner === 'sent' && res.attachment === false) {
-        toast.warning('Email sent WITHOUT PDF attachment — configure Gmail SMTP in backend/.env to attach PDFs');
-      }
+      if (res.owner === 'sent') toast.success(`Invoice emailed to owner (${settings.ownerEmail}) with PDF attached`);
+      else toast.error(res.errors?.owner || 'Owner email failed — use Retry Email');
       if (invoice.sendToTenant) {
         if (res.tenant === 'sent') toast.success(`Copy emailed to tenant (${invoice.tenantEmail})`);
         else if (res.tenant === 'no-email') toast.warning('Tenant email not provided');

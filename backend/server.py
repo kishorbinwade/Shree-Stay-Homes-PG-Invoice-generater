@@ -19,7 +19,6 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.application import MIMEApplication
 from email.utils import formataddr
-import httpx
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -30,17 +29,16 @@ api_router = APIRouter(prefix="/api")
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-EMAIL_BASE_URL = "https://integrations.emergentagent.com"
-EMAIL_KEY = os.environ.get("EMERGENT_EMAIL_KEY", "")
 EMAIL_FROM_NAME = os.environ.get("EMAIL_FROM_NAME", "Shree Stay Homes & PG")
 EMAIL_REPLY_TO = os.environ.get("EMAIL_REPLY_TO")
 
-# Optional Gmail SMTP — when configured, invoices are sent with the real PDF
-# attachment. The managed email proxy does not support attachments.
+# Gmail SMTP is the ONLY email path — invoices are sent as multipart/mixed
+# with the real PDF attachment. Credentials live only in backend/.env.
 SMTP_HOST = os.environ.get("SMTP_HOST", "smtp.gmail.com")
 SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
 SMTP_USER = os.environ.get("SMTP_USER", "")
 SMTP_APP_PASSWORD = os.environ.get("SMTP_APP_PASSWORD", "")
+SMTP_TLS = os.environ.get("SMTP_TLS", "true").lower() != "false"
 SMTP_CONFIGURED = bool(SMTP_USER and SMTP_APP_PASSWORD)
 
 # ---- Guardrail gate (structural defense for email safety) ----
@@ -175,31 +173,10 @@ def invoice_email_html(d: InvoiceEmailRequest) -> str:
     )
 
 
-async def send_invoice_email(to: str, subject: str, html: str, pdf_b64: str, filename: str) -> bool:
-    """Send one invoice email. Returns True if the PDF was actually attached."""
+async def send_invoice_email(to: str, subject: str, html: str, pdf_b64: str, filename: str) -> None:
+    """Send one invoice email via Gmail SMTP with the PDF attached."""
     _assert_safe_email(subject, html)
-    if SMTP_CONFIGURED:
-        await send_smtp_email(to, subject, html, pdf_b64, filename)
-        return True
-    payload = {
-        "to": [to],
-        "subject": subject,
-        "html": html,
-        "from_name": EMAIL_FROM_NAME,
-        "attachments": [{"filename": filename, "content": pdf_b64, "content_type": "application/pdf"}],
-    }
-    if EMAIL_REPLY_TO:
-        payload["contact_email"] = EMAIL_REPLY_TO
-    async with httpx.AsyncClient(timeout=60) as client_http:
-        resp = await client_http.post(
-            f"{EMAIL_BASE_URL}/api/v1/email/send",
-            headers={"X-Email-Key": EMAIL_KEY},
-            json=payload,
-        )
-    if resp.status_code >= 400:
-        logger.error(f"Email proxy error {resp.status_code}: {resp.text[:500]}")
-    resp.raise_for_status()
-    return False  # managed proxy silently drops attachments
+    await send_smtp_email(to, subject, html, pdf_b64, filename)
 
 
 def _send_smtp_sync(to: str, subject: str, html: str, pdf_bytes: bytes, filename: str) -> None:
@@ -209,17 +186,32 @@ def _send_smtp_sync(to: str, subject: str, html: str, pdf_bytes: bytes, filename
     msg["Subject"] = subject
     if EMAIL_REPLY_TO:
         msg["Reply-To"] = EMAIL_REPLY_TO
-    msg.attach(MIMEText(html, "html"))
+    msg.attach(MIMEText(html, "html", "utf-8"))
     part = MIMEApplication(pdf_bytes, _subtype="pdf")
     part.add_header("Content-Disposition", "attachment", filename=filename)
     msg.attach(part)
     context = ssl.create_default_context()
     with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=30) as server:
         server.ehlo()
-        server.starttls(context)
-        server.ehlo()
+        if SMTP_TLS:
+            server.starttls(context=context)
+            server.ehlo()
         server.login(SMTP_USER, SMTP_APP_PASSWORD)
         server.sendmail(SMTP_USER, [to], msg.as_string())
+
+
+def smtp_error_message(e: Exception) -> str:
+    if isinstance(e, smtplib.SMTPAuthenticationError):
+        return "Gmail authentication failed — check SMTP_USER and SMTP_APP_PASSWORD (use a Gmail App Password, not your Gmail password)"
+    if isinstance(e, smtplib.SMTPServerDisconnected):
+        return "SMTP server dropped the connection — check SMTP credentials and settings"
+    if isinstance(e, smtplib.SMTPResponseException):
+        return f"SMTP server rejected the email (code {e.smtp_code})"
+    if isinstance(e, smtplib.SMTPException):
+        return "SMTP error while sending email — check SMTP settings"
+    if isinstance(e, (ConnectionRefusedError, TimeoutError, OSError)):
+        return f"Could not reach SMTP server {SMTP_HOST}:{SMTP_PORT} — check internet connection and SMTP settings"
+    return "Email delivery failed"
 
 
 async def send_smtp_email(to: str, subject: str, html: str, pdf_b64: str, filename: str) -> None:
@@ -234,8 +226,11 @@ async def root():
 
 @api_router.post("/email/invoice")
 async def email_invoice(payload: InvoiceEmailRequest):
-    if not EMAIL_KEY and not SMTP_CONFIGURED:
-        raise HTTPException(status_code=500, detail="Email service is not configured")
+    if not SMTP_CONFIGURED:
+        raise HTTPException(
+            status_code=503,
+            detail="Gmail SMTP is not configured. Set SMTP_USER and SMTP_APP_PASSWORD in backend/.env and restart the backend.",
+        )
     if len(payload.pdfBase64) > 14_000_000:
         raise HTTPException(status_code=413, detail="PDF attachment too large")
     filename = re.sub(r"[^A-Za-z0-9_.-]", "_", payload.pdfFilename) or "invoice.pdf"
@@ -243,22 +238,22 @@ async def email_invoice(payload: InvoiceEmailRequest):
         filename += ".pdf"
     subject = re.sub(r"[\r\n]+", " ", f"PG Invoice {payload.invoiceNumber} - {payload.tenantName}")[:150]
     body = invoice_email_html(payload)
-    result = {"owner": "failed", "tenant": "skipped", "errors": {}, "attachment": SMTP_CONFIGURED}
+    result = {"owner": "failed", "tenant": "skipped", "errors": {}, "attachment": True}
     try:
         await send_invoice_email(str(payload.ownerEmail), subject, body, payload.pdfBase64, filename)
         result["owner"] = "sent"
     except Exception as e:
-        logger.error(f"Owner email failed: {e}")
-        result["errors"]["owner"] = "Owner email delivery failed"
+        logger.error(f"Owner email failed: {type(e).__name__}")
+        result["errors"]["owner"] = smtp_error_message(e)
     if payload.sendToTenant:
         if payload.tenantEmail:
             try:
                 await send_invoice_email(str(payload.tenantEmail), subject, body, payload.pdfBase64, filename)
                 result["tenant"] = "sent"
             except Exception as e:
-                logger.error(f"Tenant email failed: {e}")
+                logger.error(f"Tenant email failed: {type(e).__name__}")
                 result["tenant"] = "failed"
-                result["errors"]["tenant"] = "Tenant email delivery failed"
+                result["errors"]["tenant"] = smtp_error_message(e)
         else:
             result["tenant"] = "no-email"
     return result

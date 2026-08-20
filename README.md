@@ -51,7 +51,7 @@ No cloud database. No public hosting required. Works offline for everything exce
 | Local DB | IndexedDB via `idb` (stores: invoices, tenants, settings, sequences) |
 | PDF | jsPDF + jspdf-autotable (embedded subset font with ₹ glyph) |
 | Backend | FastAPI (email delivery only — no database) |
-| Email | Managed email proxy, or your own Gmail SMTP for PDF attachments |
+| Email | Your own Gmail via SMTP (App Password) — real PDF attachment |
 
 ---
 
@@ -115,30 +115,29 @@ yarn start                # or: npm start  →  http://localhost:3000
 
 | Key | Purpose |
 |---|---|
-| `EMERGENT_EMAIL_KEY` | Managed email delivery key — **server-side only, never exposed to the browser** |
+| `SMTP_USER` | Your Gmail address (e.g. `shreehomestaypg@gmail.com`) — **required for email** |
+| `SMTP_APP_PASSWORD` | Gmail **App Password** — see below — **required for email** |
+| `SMTP_HOST` / `SMTP_PORT` | Gmail SMTP server (`smtp.gmail.com` / `587`) |
 | `EMAIL_FROM_NAME` | Sender display name (`Shree Stay Homes & PG`) |
 | `EMAIL_REPLY_TO` | Reply-to inbox (default `shreehomestaypg@gmail.com`) |
 | `CORS_ORIGINS` | Allowed frontend origin (`http://localhost:3000` locally) |
-| `SMTP_HOST` / `SMTP_PORT` | Gmail SMTP server (`smtp.gmail.com` / `587`) |
-| `SMTP_USER` | Your Gmail address (e.g. `shreehomestaypg@gmail.com`) |
-| `SMTP_APP_PASSWORD` | Gmail **App Password** — see below |
 
-### Email & PDF attachments
+### Email configuration (Gmail SMTP)
 
-The **managed email proxy** sends invoice summary emails instantly but **does not support file attachments**. To have the **invoice PDF attached** to emails, configure **Gmail SMTP**:
+Invoice emails are sent from **your own Gmail account** via SMTP, with the **invoice PDF attached** to every email:
 
 1. On the Google account `shreehomestaypg@gmail.com`, turn on **2-Step Verification**: https://myaccount.google.com/security
 2. Create an **App Password**: https://myaccount.google.com/apppasswords (name it e.g. "PG Billing")
-3. Put it in `backend/.env`:
+3. Put both values in `backend/.env`:
    ```
    SMTP_USER=shreehomestaypg@gmail.com
    SMTP_APP_PASSWORD=xxxx xxxx xxxx xxxx
    ```
 4. Restart the backend.
 
-When SMTP is configured it is used automatically (real PDF attached). Otherwise the managed proxy sends the email **without** the PDF and the app shows a warning — invoice creation, PDF download and printing are never affected. The App Password stays only in `backend/.env` on your computer — never in the browser, IndexedDB, or git.
+Until SMTP is configured, the email endpoint returns "not configured" and the app shows **Email failed** with a **Retry Email** button — invoice creation, PDF download and printing are never affected. The App Password stays only in `backend/.env` on your computer — never in the browser, IndexedDB, or git.
 
-> **Email note:** sending email requires internet. Without connectivity (or credentials), everything else works — the UI shows "Email failed" with a **Retry Email** button.
+> **Email note:** sending email requires internet. Everything else (invoices, PDF, history, backup) works fully offline.
 
 ---
 
