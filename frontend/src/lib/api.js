@@ -1,6 +1,9 @@
 import { buildInvoicePDF, pdfToBase64, pdfFilename } from './pdf';
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+// Backend URL: set REACT_APP_BACKEND_URL in frontend/.env.
+// Falls back to http://localhost:8001 for local/offline runs.
+const BACKEND = process.env.REACT_APP_BACKEND_URL || 'http://localhost:8001';
+const API = `${BACKEND}/api`;
 
 export async function deliverInvoiceEmail(invoice, settings) {
   const doc = buildInvoicePDF(invoice, settings);
