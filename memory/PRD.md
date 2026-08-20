@@ -44,6 +44,8 @@ Production-ready PG Billing & Invoice Generator for "SHREE STAY HOMES & PG" (PG 
 
 - Stopped the leftover `mongod` supervisor process; backend + frontend + email all verified working with no MongoDB running. Testing agent iteration_2: all flows pass (7/7 backend tests; only env-level note is managed-proxy 429 rate limiting under rapid repeated sends, surfaced correctly via Retry Email).
 
+- Git fix (commit 2848fae): backend/.env.example + frontend/.env.example committed; .gitignore ignores real .env but tracks .env.example (`!.env.example`); no secrets in history (testing agent iteration_3 verified: fresh-clone cp steps work, ls-tree shows only the two example files, ek_ key absent from history). Push to GitHub (github.com/kishorbinwade/Shree-Stay-Homes-PG-Invoice-generater) must be done by the user via Emergent UI: Save → Save to GitHub (pod has no git credentials; origin remote already added).
+
 ## Backlog / Next Tasks
 - P0: none blocking.
 - P1: Verify PDF visual layout edge cases (very long tenant names/addresses) with document render check; silence recharts ResponsiveContainer width(-1) warning on first mount.
