@@ -1,0 +1,110 @@
+{
+  "project_name": "Shree Stay Homes & PG Billing & Invoice Generator",
+  "theme_strategy": {
+    "default_theme": "light",
+    "rationale": "For an invoice generator and PG dashboard, a light theme is required for maximum legibility of tabular data, seamless print-to-PDF fidelity, and establishing a professional, trustworthy aesthetic."
+  },
+  "emotional_archetype": "Organic & Earthy mixed with Soft Utility",
+  "typography": {
+    "headings": {
+      "font_family": "Manrope, sans-serif",
+      "weights": ["500", "800"],
+      "usage": "Use font-extrabold and tracking-tight for H1/H2 dashboard titles to provide structural, architectural confidence. Use font-medium for card headers.",
+      "banned_fonts": ["Space Grotesk", "Roboto", "Lato"]
+    },
+    "body": {
+      "font_family": "IBM Plex Sans, sans-serif",
+      "weights": ["400", "500", "600"],
+      "usage": "Highly legible for dense invoice data, pricing tables, and numerical input."
+    },
+    "hierarchy_rules": {
+      "h1": "text-4xl sm:text-5xl tracking-tight leading-none text-stone-900",
+      "h2": "text-2xl sm:text-3xl tracking-tight text-stone-900",
+      "h3": "text-xl sm:text-2xl font-medium",
+      "h4": "text-lg sm:text-xl font-medium",
+      "body": "text-sm text-stone-600 leading-relaxed",
+      "labels": "text-xs tracking-[0.1em] uppercase text-stone-500 font-semibold"
+    }
+  },
+  "colors": {
+    "palette": {
+      "background": "#F7F5F2",
+      "surface": "#FFFFFF",
+      "primary": "#D85C40",
+      "primary_hover": "#BD482E",
+      "text_primary": "#1C1B1A",
+      "text_secondary": "#5C5A57",
+      "border": "#E6E4E0",
+      "success": "#3A7D44",
+      "warning": "#E8A317",
+      "danger": "#D93838"
+    },
+    "tailwind_config_instructions": "Extend tailwind colors with 'stone' as the base neutral, and 'terracotta' (#D85C40) as the primary brand color to give it a warm, brick/home feel. AVOID teal green, teal blue, or generic SaaS blue (#2563EB).",
+    "surface_strategy": {
+      "dashboard_background": "bg-[#F7F5F2]",
+      "cards": "bg-white border border-[#E6E4E0] shadow-sm rounded-xl",
+      "inputs": "bg-[#FDFCFB] border border-[#E6E4E0] focus:border-[#D85C40] focus:ring-1 focus:ring-[#D85C40]"
+    }
+  },
+  "grids_and_layouts": {
+    "dashboard_mode": "High Density Grid (Mode B)",
+    "spacing_system": "Generous Spacing Philosophy. Use p-6 or p-8 for main dashboard cards, p-4 for list items.",
+    "sidebar": "Fixed left sidebar, solid white background, 1px right border (border-stone-200). DO NOT use glassmorphism.",
+    "metrics_grid": "grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6. Children must stretch to fill heights. Use sharp structural alignment.",
+    "invoice_form": "Two-column grid layout for desktop (lg:grid-cols-12), where form takes col-span-8 and live preview takes col-span-4."
+  },
+  "components": {
+    "library": "shadcn/ui (JavaScript/JSX versions only, DO NOT use TSX)",
+    "icons": "lucide-react (Standard weight, crisp edges)",
+    "modals_dialogs": "Use Shadcn Dialog. Backdrop must be bg-stone-900/40 backdrop-blur-sm. Modals must be solid white with rounded-xl.",
+    "tables": "Use Shadcn Table. No outer borders, just subtle border-b (border-stone-100) between rows. Text sizes should be text-sm.",
+    "buttons": "Primary: bg-terracotta-500 text-white hover:bg-terracotta-600 rounded-md px-6. Secondary: border border-stone-200 bg-white hover:bg-stone-50 rounded-md.",
+    "badges": "For payment status (Paid, Pending): Use subtle tinted backgrounds (bg-green-50 text-green-700, bg-amber-50 text-amber-700) with rounded-full."
+  },
+  "visual_enhancers": {
+    "offline_indicator": "A permanent, subtle top-bar or bottom-left toast indicator stating 'Offline Mode - Changes saved locally' using a warning color.",
+    "empty_states": "Generous vertical padding (py-24), a subtle gray Lucide icon (size 48), and clear 'Create First Invoice' CTA.",
+    "invoice_watermark": "When generating PDF, place the PG Logo directly in the center with 10% opacity, angled at -30 degrees."
+  },
+  "motion": {
+    "interactions": "Hover states on table rows: bg-stone-50 transition-colors duration-150. Button hover: -translate-y-[1px] shadow-sm.",
+    "page_transitions": "None required for functional speed, but use Framer Motion for a subtle stagger-in effect on dashboard metric cards (y: 10, opacity: 0 -> 1)."
+  },
+  "accessibility": {
+    "contrast": "Ensure text primary/secondary passes WCAG AA against the stone-50 background.",
+    "focus": "All interactive elements must have focus-visible:ring-2 focus-visible:ring-terracotta-500 focus-visible:ring-offset-2.",
+    "test_ids": "CRITICAL: All interactive elements, inputs, and buttons MUST include a data-testid attribute (e.g., data-testid='create-invoice-button')."
+  },
+  "image_urls": {
+    "auth_background": {
+      "url": "https://images.unsplash.com/photo-1750420556288-d0e32a6f517b?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2NDF8MHwxfHNlYXJjaHwxfHxtb2Rlcm4lMjBtaW5pbWFsJTIwYmVkcm9vbSUyMGludGVyaW9yfGVufDB8fHx8MTc4NzI1MDM5Nnww&ixlib=rb-4.1.0&q=85",
+      "description": "Warm, modern, neutral bedroom interior to be used as a split-screen background image for the login/auth page."
+    },
+    "decorative_pattern": {
+      "url": "https://images.unsplash.com/photo-1498262257252-c282316270bc?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMzJ8MHwxfHNlYXJjaHwyfHxhYnN0cmFjdCUyMGFyY2hpdGVjdHVyYWwlMjBwYXR0ZXJufGVufDB8fHx8MTc4NzEyODI2NHww&ixlib=rb-4.1.0&q=85",
+      "description": "Abstract white architectural ribs. Can be used at 5% opacity for empty states or dashboard headers."
+    }
+  },
+  "instructions_to_main_agent": [
+    "Initialize Tailwind config with the 'stone' and 'terracotta' color palette. Define specific theme variables for background, surface, and text.",
+    "Use JavaScript (.js or .jsx) exclusively for React files. Do not use TypeScript.",
+    "For the Invoice creation form, implement live INR calculations dynamically as the user types rent, electricity, maintenance, etc.",
+    "Use localForage or the native IndexedDB API for offline-first data storage. Ensure all operations (create, edit, delete invoice) update IndexedDB first.",
+    "For the PDF generation, use jsPDF + autoTable. Ensure the layout mimics the on-screen view closely, injecting the uploaded PG logo at the top and as a watermark.",
+    "Include a 'data-testid' attribute on every input, button, and dynamic table row to support end-to-end testing.",
+    "Build the dashboard using pure structural layouts. Avoid nesting cards within cards. Use Shadcn Table for Invoice History and Tenants.",
+    "Implement the Settings page with native file input (FileReader API) to convert uploaded logos/signatures to Base64 and store them in IndexedDB.",
+    "In the Backup/Restore tab, generate a downloadable JSON file containing the IndexedDB state for export, and read a JSON file to overwrite IndexedDB for import.",
+    "For emails, hit the FastAPI backend endpoint containing the Resend API logic, passing the Base64 PDF."
+  ],
+  "UNIVERSAL_GUIDELINES_FOR_MAIN_AGENT": [
+    "Do not converge towards generic, on-distribution outputs. Avoid 'AI slop' aesthetics.",
+    "Use pure flat design with structural 1px borders rather than heavy drop shadows.",
+    "Ensure all interactive components have clearly defined hover, active, and focus states.",
+    "Avoid using AI assistant emojis in UI text.",
+    "Do not apply global transitions (e.g., transition: all).",
+    "Never use generic placeholder URLs for images. Use the ones provided in the image_urls section.",
+    "Use 'sonner' for toast notifications to provide immediate offline/sync status feedback.",
+    "Maintain high density in tables and forms, but generous padding around page containers."
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "name": "Shree Stay Homes & PG — Billing & Invoices",
+  "short_name": "Shree Stay PG",
+  "description": "PG Billing & Invoice Generator for Shree Stay Homes & PG",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F7F5F2",
+  "theme_color": "#D85C40",
+  "icons": [
+    {
+      "src": "/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "summary": "Tested Shree Stay Homes & PG billing app end-to-end. Backend: 7/7 pytest tests pass (health + email/invoice happy paths + validation 422s). Frontend: dashboard empty/filled states, create invoice with live INR summary, auto-increment numbering (SHPG-2026-0001 -> 0002), IndexedDB persistence across reload, tenants auto-creation, settings save persistence, invoice-prefix reflection in next-number preview, backup JSON export, offline indicator hidden while online — all working. Two bugs found: (1) CRITICAL email 422 when amountPaid left blank; (2) recurring pageerror 'e.split is not a function' on nearly every route.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "CreateInvoice / api client (lib/api.js or handleGenerate/runEmail in CreateInvoice.jsx)", "issue": "When user leaves 'Amount Paid' blank, the payload sends amountPaid as empty string '' to POST /api/email/invoice. Pydantic rejects with 422 float_parsing, and UI then shows email-status-owner='Failed', email-status-tenant='Failed'. Fix: coerce empty numeric fields to 0 (Number(f.amountPaid)||0) before building the request body.", "selector": "[data-testid=amount-paid], [data-testid=email-status-owner]", "priority": "HIGH"},
+      {"component": "lib/format.js -> monthLabel", "issue": "PAGEERROR 'e.split is not a function' fires repeatedly (every page navigation, incl. /dashboard, /history, /invoices/new). Root cause is monthLabel(m) calling m.split('-') where m is not always a string (likely receives a Date or number from history rows / recent invoices). Guard with typeof m !== 'string' or coerce with String(m).", "selector": "n/a", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [
+      {"flow": "Generate Invoice with Send-to-tenant checked but amountPaid empty", "issue": "Backend returns 422; both owner and tenant statuses display 'Failed' — misleading because the invoice was saved to IndexedDB successfully; only email failed. Consider showing the actual error detail and/or fixing the payload.", "affected_selectors": ["[data-testid=email-status-owner]", "[data-testid=email-status-tenant]", "[data-testid=retry-email-btn]"]}
+    ],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/backend_test.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": [
+    "Fix CreateInvoice generate/email payload: coerce empty numeric strings (amountPaid, all charges) to numbers before POSTing /api/email/invoice.",
+    "Fix monthLabel in /app/frontend/src/lib/format.js to handle non-string inputs (Date/Number) to eliminate 'e.split is not a function' pageerrors.",
+    "Optional: surface backend 422 detail in the UI (currently only shows generic 'Failed')."
+  ],
+  "critical_code_review_comments": [
+    "Backend /api/email/invoice payload validation is strict (float required). Front-end should sanitise numeric inputs.",
+    "monthLabel lacks defensive input handling — leads to app-wide pageerrors.",
+    "Prefix change resets numbering (PGX-2026-0001 after 2 SHPG invoices); confirm this is intended per-prefix behaviour or unify sequence keys.",
+    "Recharts container shows width(-1)/height(-1) warnings on initial mount — provide explicit minWidth/minHeight or aspect to silence warnings."
+  ],
+  "updated_files": ["/app/backend/tests/backend_test.py"],
+  "success_rate": {"backend": "100% (7/7)", "frontend": "~85% (main flows working; 2 defects)"},
+  "test_credentials": "None required. Owner email: shreehomestaypg@gmail.com. Tenant email test: delivered@resend.dev.",
+  "seed_data_creation": "Created transient invoices during test (SHPG-2026-0001 Anita Sharma, SHPG-2026-0002 Rajesh Kumar). IndexedDB was cleared at start; state persists per browser context.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend pytest suite is at /app/backend/tests/backend_test.py (7 tests, all pass). Not tested exhaustively in UI: history row actions (view/edit/duplicate/delete), Backup Import restore, Delete All Local Data confirmation, PDF file contents via pdftotext. IndexedDB name is 'shree-stay-pg-db'. Bugs to retest after fix: (1) leave amountPaid blank + generate — email should be 'Sent', (2) navigate all routes and confirm no pageerror in console.",
+  "rca_of_the_issue": "Bug 1: In CreateInvoice.jsx runEmail (or lib/api.js sendInvoiceEmail wrapper), fields from React form state that are empty strings are passed straight through JSON.stringify, sending {\"amountPaid\":\"\"}. FastAPI's Pydantic model InvoiceEmailRequest declares amountPaid: float, so Pydantic returns 422 float_parsing. Confirmed by intercepting the network payload: {'amountPaid': '', ...}. Fix in one place: coerce with Number(x)||0 for amountPaid/total/balanceDue before POST. Reproduction: /invoices/new -> fill tenant name+mobile+rent, check 'Send to tenant', enter tenant email, leave 'Amount Paid' blank -> Generate -> UI shows Failed for both statuses; backend log shows 422. Bug 2: monthLabel(m) receives non-string; likely called from History or Dashboard with billingMonth stored as Date or number after JSON reload."
+}
