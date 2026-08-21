@@ -50,6 +50,9 @@ Production-ready PG Billing & Invoice Generator for "SHREE STAY HOMES & PG" (PG 
 
 - SMTP fix committed as c3fee10; testing agent iteration_4 passed 100% (starttls keyword fix, utf-8 MIMEText, 503-when-unconfigured, error mapping, invoice-save-unaffected-by-email-failure, zero pageerrors). Push to GitHub pending user action via Emergent Save → Save to GitHub (pod holds no git credentials).
 
+## Implemented (2026-08-21, IndexedDB → SQLite migration)
+- Primary storage is now SQLite (`backend/data/pg_billing.db`, WAL) via `backend/database.py`; FastAPI REST API for invoices/tenants/settings/backup/migrate; invoice numbers allocated atomically server-side (BEGIN IMMEDIATE). Frontend `lib/api.js` replaces IndexedDB; legacy IndexedDB is auto-deleted on first load (owner-approved, no migration prompt). run-local.sh binds 127.0.0.1; .gitignore covers backend/data/ and *.db. Backend pytest: 16 hermetic tests pass. Committed as c3fee10→(sqlite commit).
+
 ## Backlog / Next Tasks
 - P0: none blocking.
 - P1: Verify PDF visual layout edge cases (very long tenant names/addresses) with document render check; silence recharts ResponsiveContainer width(-1) warning on first mount.
