@@ -27,8 +27,9 @@ fi
 source .venv/bin/activate
 pip install -q -r requirements.txt
 
-echo "==> Starting API on http://localhost:8001 …"
-uvicorn server:app --host 0.0.0.0 --port 8001 &
+echo "==> Starting API on http://127.0.0.1:8001 …"
+mkdir -p "$ROOT/backend/data"
+uvicorn server:app --host 127.0.0.1 --port 8001 &
 BACK_PID=$!
 trap 'kill $BACK_PID 2>/dev/null || true' EXIT
 

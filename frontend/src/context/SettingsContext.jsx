@@ -1,26 +1,27 @@
 import { createContext, useContext, useEffect, useState, useCallback } from 'react';
-import { getSettings, saveSettings, DEFAULT_SETTINGS } from '../lib/db';
+import { fetchSettings, saveSettings as apiSaveSettings, DEFAULT_SETTINGS } from '../lib/api';
 
 const SettingsContext = createContext(null);
 
 export function SettingsProvider({ children }) {
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const [loaded, setLoaded] = useState(false);
+  const [backendDown, setBackendDown] = useState(false);
 
   useEffect(() => {
-    getSettings()
-      .then((s) => setSettings(s))
-      .catch(() => {})
+    fetchSettings()
+      .then((s) => { setSettings(s); setBackendDown(false); })
+      .catch(() => setBackendDown(true))
       .finally(() => setLoaded(true));
   }, []);
 
   const updateSettings = useCallback(async (next) => {
-    await saveSettings(next);
+    await apiSaveSettings(next);
     setSettings(next);
   }, []);
 
   return (
-    <SettingsContext.Provider value={{ settings, updateSettings, loaded }}>
+    <SettingsContext.Provider value={{ settings, updateSettings, loaded, backendDown }}>
       {children}
     </SettingsContext.Provider>
   );

@@ -4,42 +4,39 @@ A complete, **offline-first**, **privacy-first** PG billing & invoicing applicat
 
 Create invoices → automatic billing calculations in ₹ INR → watermarked A4 PDF → download / print → email to owner (and optionally tenant) → invoice history → backup & restore.
 
-> **MongoDB is not required. Billing and tenant data are stored locally in IndexedDB.** The app is 100% local: the React frontend + browser IndexedDB hold all invoices, tenants, settings and history. The small FastAPI backend exists **only** for secure email delivery — it stores nothing.
+> **MongoDB is not required. No cloud database. No public hosting.** All billing and tenant data is stored in a **local SQLite database** (`backend/data/pg_billing.db`) on your computer. Internet is needed **only** for sending email via Gmail SMTP.
 
 ---
 
 ## Architecture
 
 ```
-Linux Computer
-      │
-      ├── React frontend  (http://localhost:3000)
-      │      │
-      │      └── IndexedDB  →  invoices / tenants / settings / history
-      │
-      └── FastAPI  (http://localhost:8001)
-             │
-             └── Internet
-                   │
-                   └── Email service (managed proxy, or your Gmail SMTP)
+Linux PC
+├── React frontend  →  http://localhost:3000
+│
+└── FastAPI backend  →  http://127.0.0.1:8001
+       ├── SQLite  →  backend/data/pg_billing.db   (all billing data)
+       └── Gmail SMTP  →  only when sending invoice emails
 ```
 
-No cloud database. No public hosting required. Works offline for everything except sending email.
+- The backend binds to **127.0.0.1** by default (local-only) and CORS allows only `http://localhost:3000`.
+- The backend stores **no secrets in SQLite** — the Gmail App Password lives only in `backend/.env` (git-ignored).
+- Everything works **offline** (create/edit/search/calculate/history/PDF/download/print). Only email needs internet.
 
 ---
 
 ## Features
 
-- **Dashboard** — total invoices, total billed, collected, pending; current-month collection & pending; 6-month billed-vs-collected chart; recent invoices
-- **Create Invoice** — tenant details, room/bed, check-in/out, itemized charges (rent, deposit, electricity, food, maintenance, other, discount, previous balance); instant Subtotal → Discount → Total → Paid → Balance; auto payment status (Paid / Partially Paid / Pending); advance-payment guard
-- **Sequential invoice numbers** — `SHPG-2026-0001`, `SHPG-2026-0002`, … auto-generated, never duplicated, sequence survives restarts
-- **Watermarked PDF** — professional A4 invoice (logo, address, GSTIN, itemized charges, payment details, authorized signature) with an embedded diagonal `SHREE STAY HOMES & PG` watermark and footer on every page; multi-page support; ₹ glyph embedded in the PDF font
-- **Email invoices** — PDF emailed to the owner (default `shreehomestaypg@gmail.com`); optional tenant copy via checkbox; per-recipient status (Sent / Failed / not provided) with retry; resend anytime from History
-- **Invoice History** — search (tenant / invoice no), filter by month & payment status, sort by date; view, download, print, resend email, duplicate, edit (keeps the same number), delete with confirmation
+- **Dashboard** — total invoices, billed, collected, pending; current-month collection & pending; 6-month billed-vs-collected chart; recent invoices
+- **Create Invoice** — tenant details, room/bed, check-in/out, itemized charges (rent, deposit, electricity, food, maintenance, other, discount, previous balance); instant Subtotal → Discount → Total → Paid → Balance; auto payment status; advance-payment guard
+- **Sequential invoice numbers** — `SHPG-2026-0001`, `0002`, … allocated atomically inside a SQLite transaction (`BEGIN IMMEDIATE`), so numbers never duplicate — even across restarts or restores
+- **Watermarked PDF** — professional A4 invoice (logo, address, GSTIN, itemized charges, payment details, authorized signature) with embedded diagonal watermark + footer on every page; multi-page; ₹ glyph embedded; generated locally in the browser
+- **Email via Gmail SMTP** — every invoice PDF is emailed to the owner (`shreehomestaypg@gmail.com`) by default; optional tenant copy; real PDF attachment; per-recipient status with retry; clear errors for auth failure / no internet
+- **Invoice History** — server-side search (tenant / invoice no), month & status filters, date sorting; view, download, print, resend email, duplicate, edit (same number), delete with confirmation
 - **Tenants** — auto-built from invoices with billed/pending aggregates; one-click prefilled new invoice
-- **Settings** — business name, address, mobile, email, GSTIN, logo & signature upload, owner email, email toggles, invoice prefix & starting number, default terms/notes, watermark text
-- **Backup & Restore** — export all data as JSON, invoices as CSV; import/merge a backup on another device; Delete All Local Data behind a strong confirmation dialog
-- **PWA / Offline** — installable app shell, service-worker caching, offline indicator; works offline for everything except email
+- **Settings** — business info, logo & signature upload, owner email, email toggles, invoice prefix & starting number, terms, notes, watermark text — stored in SQLite
+- **Backup & Restore** — export everything as JSON or invoices as CSV; validated merge-import (existing records are never silently overwritten; duplicates skipped; numbering sequence preserved); Delete All Data behind a strong confirmation
+- **PWA / Offline** — installable app shell, service-worker caching, offline indicator
 
 ---
 
@@ -48,10 +45,10 @@ No cloud database. No public hosting required. Works offline for everything exce
 | Layer | Technology |
 |---|---|
 | Frontend | React 19, Tailwind CSS, shadcn/ui, recharts, framer-motion |
-| Local DB | IndexedDB via `idb` (stores: invoices, tenants, settings, sequences) |
-| PDF | jsPDF + jspdf-autotable (embedded subset font with ₹ glyph) |
-| Backend | FastAPI (email delivery only — no database) |
-| Email | Your own Gmail via SMTP (App Password) — real PDF attachment |
+| Backend | FastAPI (REST API + email) |
+| Database | SQLite via Python's built-in `sqlite3` (WAL mode) — file at `backend/data/pg_billing.db` |
+| PDF | jsPDF + jspdf-autotable in the browser (embedded subset font with ₹ glyph) |
+| Email | Gmail SMTP (STARTTLS, port 587) via stdlib `smtplib` — real PDF attachment |
 
 ---
 
@@ -61,44 +58,40 @@ No cloud database. No public hosting required. Works offline for everything exce
 
 - **Python 3.10+** with venv support (`sudo apt install python3 python3-venv`)
 - **Node.js 18+** and **yarn** (`npm install -g yarn`) — or npm
-- **MongoDB is NOT required** — there is no database to install
+- **No database server to install** — SQLite is built into Python
 
-### Option A — One command
+### Quick start
 
 ```bash
-git clone <your-repo-url> shree-stay-pg
-cd shree-stay-pg
+git clone https://github.com/kishorbinwade/Shree-Stay-Homes-PG-Invoice-generater.git
+cd Shree-Stay-Homes-PG-Invoice-generater
 ./scripts/run-local.sh
 ```
 
 Then open **http://localhost:3000**
 
-The script automatically:
+The script:
 1. Creates `backend/.env` and `frontend/.env` from the `.env.example` templates (first run only)
 2. Creates a Python virtual environment and installs backend dependencies
-3. Starts the FastAPI email API on **port 8001**
-4. Installs frontend dependencies and starts the React app on **port 3000**
+3. Creates `backend/data/` and starts FastAPI on **127.0.0.1:8001** (SQLite auto-initializes)
+4. Installs frontend dependencies and starts React on **port 3000**
 
-Stop everything with `Ctrl+C`.
+Stop both with `Ctrl+C`.
 
-### Option B — Manual (two terminals)
+### Manual start (alternative)
 
-**Terminal 1 — backend:**
 ```bash
+# Terminal 1 — backend
 cd backend
 cp .env.example .env
-python3 -m venv .venv
-source .venv/bin/activate
+python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-uvicorn server:app --host 0.0.0.0 --port 8001
-```
+uvicorn server:app --host 127.0.0.1 --port 8001
 
-**Terminal 2 — frontend:**
-```bash
+# Terminal 2 — frontend
 cd frontend
-cp .env.example .env      # points REACT_APP_BACKEND_URL to http://localhost:8001
-yarn install              # or: npm install
-yarn start                # or: npm start  →  http://localhost:3000
+cp .env.example .env
+yarn install && yarn start        # http://localhost:3000
 ```
 
 ---
@@ -109,25 +102,23 @@ yarn start                # or: npm start  →  http://localhost:3000
 
 | Key | Purpose | Local value |
 |---|---|---|
-| `REACT_APP_BACKEND_URL` | Where the email API is reachable | `http://localhost:8001` |
+| `REACT_APP_BACKEND_URL` | Where the local API is reachable | `http://localhost:8001` |
 
-### `backend/.env`
+### `backend/.env` (never committed — git-ignored)
 
 | Key | Purpose |
 |---|---|
-| `SMTP_USER` | Your Gmail address (e.g. `shreehomestaypg@gmail.com`) — **required for email** |
-| `SMTP_APP_PASSWORD` | Gmail **App Password** — see below — **required for email** |
-| `SMTP_HOST` / `SMTP_PORT` | Gmail SMTP server (`smtp.gmail.com` / `587`) |
+| `SMTP_USER` | Your Gmail address (`shreehomestaypg@gmail.com`) — **required for email** |
+| `SMTP_APP_PASSWORD` | Gmail **App Password** — **required for email** |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_TLS` | `smtp.gmail.com` / `587` / `true` |
 | `EMAIL_FROM_NAME` | Sender display name (`Shree Stay Homes & PG`) |
-| `EMAIL_REPLY_TO` | Reply-to inbox (default `shreehomestaypg@gmail.com`) |
-| `CORS_ORIGINS` | Allowed frontend origin (`http://localhost:3000` locally) |
+| `EMAIL_REPLY_TO` | Reply-to inbox |
+| `CORS_ORIGINS` | `http://localhost:3000` |
 
 ### Email configuration (Gmail SMTP)
 
-Invoice emails are sent from **your own Gmail account** via SMTP, with the **invoice PDF attached** to every email:
-
-1. On the Google account `shreehomestaypg@gmail.com`, turn on **2-Step Verification**: https://myaccount.google.com/security
-2. Create an **App Password**: https://myaccount.google.com/apppasswords (name it e.g. "PG Billing")
+1. On the Google account, turn on **2-Step Verification**: https://myaccount.google.com/security
+2. Create an **App Password**: https://myaccount.google.com/apppasswords
 3. Put both values in `backend/.env`:
    ```
    SMTP_USER=shreehomestaypg@gmail.com
@@ -135,48 +126,63 @@ Invoice emails are sent from **your own Gmail account** via SMTP, with the **inv
    ```
 4. Restart the backend.
 
-Until SMTP is configured, the email endpoint returns "not configured" and the app shows **Email failed** with a **Retry Email** button — invoice creation, PDF download and printing are never affected. The App Password stays only in `backend/.env` on your computer — never in the browser, IndexedDB, or git.
-
-> **Email note:** sending email requires internet. Everything else (invoices, PDF, history, backup) works fully offline.
+The App Password is **never** sent to the React frontend, never stored in SQLite, never logged, and never committed to GitHub. Until SMTP is configured, email sends return a clear "not configured" message and the UI offers **Retry Email** — invoicing, PDF, history and backup are unaffected.
 
 ---
+
+## Data, Backup & Safety
+
+- **Database file:** `backend/data/pg_billing.db` — created automatically, git-ignored (`backend/data/`, `*.db`).
+- **Recommended backup:** use the app's **Backup & Restore** page → Export JSON (portable, validated on restore, preserves invoice numbering).
+- **Manual backup:** you can also simply copy `backend/data/pg_billing.db` somewhere safe while the app is stopped.
+- **Restore** merges by invoice number — existing records are skipped, never silently overwritten; a confirmation dialog is shown first.
+- **Migration:** upgrading from the old browser-storage (IndexedDB) version — legacy browser data is simply discarded on first load. If you need it, export a JSON backup from the old version first.
+
+## API Overview (local only)
+
+```
+GET    /api/invoices?q=&month=&status=&order=     list / search / filter / sort
+POST   /api/invoices                              create (atomic sequential number)
+GET    /api/invoices/next-number                  preview next number
+GET    /api/invoices/{id}                         fetch one
+PUT    /api/invoices/{id}                         update (number never changes)
+DELETE /api/invoices/{id}                         delete
+GET    /api/tenants  /api/tenants/{id}            list / fetch
+DELETE /api/tenants/{id}                          remove (invoices kept)
+GET    /api/settings   PUT /api/settings          settings in SQLite
+GET    /api/backup/export                         full JSON backup download
+GET    /api/backup/export.csv                     invoices CSV download
+POST   /api/backup/import?mode=merge|overwrite    validated restore
+POST   /api/migrate                               IndexedDB → SQLite migration
+DELETE /api/data                                  wipe all (confirmed in UI)
+POST   /api/email/invoice                         Gmail SMTP send with PDF
+```
 
 ## Project Structure
 
 ```
 ├── backend/
-│   ├── server.py            # FastAPI — POST /api/email/invoice (email only, no DB)
-│   ├── requirements.txt     # fastapi, uvicorn, httpx, pydantic — that's all
+│   ├── server.py            # FastAPI — REST API + Gmail SMTP email
+│   ├── database.py          # SQLite layer (schema, CRUD, sequences, backup)
+│   ├── data/                # pg_billing.db lives here (git-ignored, auto-created)
+│   ├── tests/               # hermetic pytest suite (temp DB)
 │   └── .env.example
 ├── frontend/
-│   ├── public/
-│   │   ├── sw.js            # service worker (offline shell)
-│   │   ├── manifest.json    # PWA manifest
-│   │   └── icons/
-│   ├── src/
-│   │   ├── pages/           # Dashboard, CreateInvoice, History, Tenants, Settings, Backup
-│   │   ├── components/      # Layout (sidebar), InvoicePreview, shadcn ui/
-│   │   ├── lib/             # db.js (IndexedDB), pdf.js, api.js, backup.js, format.js
-│   │   ├── context/         # SettingsContext
-│   │   └── fonts/           # subset TTF embedded in PDFs (₹ support)
-│   └── .env.example
+│   ├── public/              # sw.js (offline shell), manifest.json, icons
+│   └── src/
+│       ├── pages/           # Dashboard, CreateInvoice, History, Tenants, Settings, Backup
+│       ├── components/      # Layout, InvoicePreview, MigrationPrompt, shadcn ui/
+│       ├── lib/             # api.js (REST client), pdf.js, db.js (legacy IDB read for migration)
+│       └── fonts/           # subset TTF embedded in PDFs (₹ support)
 ├── scripts/
-│   └── run-local.sh         # one-command Linux startup
+│   ├── run-local.sh         # one-command Linux startup
+│   └── test_smtp_server.py  # local SMTP sink for email testing
 └── README.md
 ```
 
-## How It Works
-
-1. Owner fills tenant details + charges → totals update instantly (₹ INR formatting)
-2. **Generate Invoice** → unique number assigned → saved to IndexedDB → watermarked PDF built in the browser
-3. PDF emailed to the owner; tenant copy if the checkbox is ticked
-4. Owner can **Download** / **Print** the PDF anytime — fully offline
-5. Everything is searchable in **Invoice History**; export JSON/CSV backups from **Backup & Restore**
-
 ## Security & Privacy
 
-- No authentication needed — it's a single-owner local app
-- No credentials, API keys or passwords in frontend code or browser storage; `.env` is git-ignored, only `.env.example` templates are committed
-- Tenant data is never uploaded anywhere; it leaves the device only as an invoice email when the owner explicitly sends it
-- No billing data is sent to or stored by the backend — it only relays the email
-- Form validation, negative-amount prevention, duplicate-invoice-number protection, and confirmation dialogs for destructive actions
+- Local-only: backend binds `127.0.0.1`; CORS restricted to `http://localhost:3000`; no public exposure of the API or the SQLite file
+- No secrets in frontend code, IndexedDB, SQLite, API responses, logs, or git
+- Invoice numbers are allocated inside SQLite transactions — duplicates are impossible even across restarts
+- Input validation on both client and server (negative amounts, emails, required fields)

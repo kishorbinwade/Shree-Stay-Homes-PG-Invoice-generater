@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
   Search, Eye, Download, Printer, Mail, Copy, Pencil, Trash2, ArrowUpDown,
   FileText, Loader2, FilePlus2,
 } from 'lucide-react';
-import { listInvoices, deleteInvoice, putInvoice } from '../lib/db';
+import { fetchInvoices, removeInvoice, updateInvoice } from '../lib/api';
 import { inr, fmtDate, monthLabel } from '../lib/format';
 import { buildInvoicePDF, downloadPDF, printPDF } from '../lib/pdf';
 import { deliverInvoiceEmail } from '../lib/api';
@@ -44,23 +44,27 @@ export default function History() {
   const [pendingDelete, setPendingDelete] = useState(null);
   const [busyId, setBusyId] = useState('');
 
-  const reload = () => listInvoices().then(setInvoices).catch(() => {});
+  const reload = useCallback(
+    () =>
+      fetchInvoices({
+        q: q.trim() || undefined,
+        month: month || undefined,
+        status: statusFilter,
+        order: sortAsc ? 'asc' : 'desc',
+      })
+        .then(setInvoices)
+        .catch((e) => toast.error(e.message)),
+    [q, month, statusFilter, sortAsc],
+  );
   useEffect(() => {
-    reload().finally(() => setLoading(false));
-  }, []);
-
-  const filtered = useMemo(() => {
-    let out = invoices;
-    const needle = q.trim().toLowerCase();
-    if (needle) out = out.filter((i) => i.tenantName?.toLowerCase().includes(needle) || i.invoiceNumber?.toLowerCase().includes(needle));
-    if (month) out = out.filter((i) => i.billingMonth === month);
-    if (statusFilter !== 'all') out = out.filter((i) => i.paymentStatus === statusFilter);
-    return [...out].sort((a, b) => (sortAsc ? 1 : -1) * (a.invoiceDate || a.createdAt || '').localeCompare(b.invoiceDate || b.createdAt || ''));
-  }, [invoices, q, month, statusFilter, sortAsc]);
+    setLoading(true);
+    const t = setTimeout(() => reload().finally(() => setLoading(false)), 250);
+    return () => clearTimeout(t);
+  }, [reload]);
 
   const handleDelete = async () => {
     if (!pendingDelete) return;
-    await deleteInvoice(pendingDelete.id);
+    await removeInvoice(pendingDelete.id);
     toast.success(`Invoice ${pendingDelete.invoiceNumber} deleted`);
     setPendingDelete(null);
     reload();
@@ -70,7 +74,7 @@ export default function History() {
     setBusyId(inv.id);
     try {
       const res = await deliverInvoiceEmail({ ...inv, sendToTenant: !!inv.sendToTenant }, settings);
-      await putInvoice({ ...inv, emailStatus: { owner: res.owner, tenant: res.tenant, at: new Date().toISOString() }, updatedAt: new Date().toISOString() });
+      await updateInvoice(inv.id, { ...inv, emailStatus: { owner: res.owner, tenant: res.tenant, at: new Date().toISOString() } });
       if (res.owner === 'sent') toast.success(`Resent to owner (${settings.ownerEmail}) with PDF attached`);
       else toast.error(res.errors?.owner || 'Resend failed');
       if (res.tenant === 'sent') toast.success('Copy sent to tenant');
@@ -90,7 +94,7 @@ export default function History() {
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="font-heading text-3xl font-extrabold tracking-tight text-stone-900 sm:text-4xl">Invoice History</h1>
-          <p className="mt-1 text-sm text-stone-600">{filtered.length} of {invoices.length} invoices</p>
+          <p className="mt-1 text-sm text-stone-600">{invoices.length} invoices</p>
         </div>
         <Button asChild className="bg-terracotta-500 text-white hover:bg-terracotta-600">
           <Link to="/invoices/new" data-testid="history-new-invoice-btn"><FilePlus2 className="mr-2 h-4 w-4" /> New Invoice</Link>
@@ -120,10 +124,10 @@ export default function History() {
       <div className="rounded-xl border border-[#E6E4E0] bg-white shadow-sm">
         {loading ? (
           <div className="py-24 text-center text-sm text-stone-400" data-testid="history-loading">Loading invoices…</div>
-        ) : filtered.length === 0 ? (
+        ) : invoices.length === 0 ? (
           <div className="flex flex-col items-center py-24 text-center" data-testid="history-empty-state">
             <FileText className="h-12 w-12 text-stone-300" />
-            <p className="mt-3 text-sm text-stone-500">{invoices.length === 0 ? 'No invoices yet.' : 'No invoices match your filters.'}</p>
+            <p className="mt-3 text-sm text-stone-500">No invoices found. Create one or adjust your filters.</p>
             <Button asChild className="mt-4 bg-terracotta-500 text-white hover:bg-terracotta-600">
               <Link to="/invoices/new" data-testid="history-create-first-btn">Create First Invoice</Link>
             </Button>
@@ -147,7 +151,7 @@ export default function History() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((inv) => (
+                {invoices.map((inv) => (
                   <tr key={inv.id} className="border-b border-stone-100 transition-colors duration-150 hover:bg-stone-50" data-testid={`history-row-${inv.invoiceNumber}`}>
                     <td className="px-4 py-3 font-semibold text-stone-900">{inv.invoiceNumber}</td>
                     <td className="whitespace-nowrap px-4 py-3 text-stone-600">{fmtDate(inv.invoiceDate)}</td>

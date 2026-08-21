@@ -80,7 +80,7 @@ function OfflineIndicator() {
 }
 
 export default function Layout() {
-  const { settings } = useSettings();
+  const { settings, backendDown } = useSettings();
   const [open, setOpen] = useState(false);
 
   return (
@@ -108,6 +108,11 @@ export default function Layout() {
         <div className="font-heading font-extrabold text-sm tracking-tight text-stone-900 truncate">{settings.businessName}</div>
       </div>
 
+      {backendDown && (
+        <div data-testid="backend-offline-banner" className="border-b border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700 lg:pl-64">
+          Cannot reach the local backend (http://localhost:8001). Start it with ./scripts/run-local.sh — invoices, history and settings need it running.
+        </div>
+      )}
       <main className="lg:pl-64">
         <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
           <Outlet />

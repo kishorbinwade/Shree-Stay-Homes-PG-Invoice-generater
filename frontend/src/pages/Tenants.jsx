@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Users, FilePlus2, Trash2, Search } from 'lucide-react';
-import { listTenants, listInvoices, deleteTenant } from '../lib/db';
+import { fetchTenants, fetchInvoices, removeTenant } from '../lib/api';
 import { inr, fmtDate } from '../lib/format';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -20,7 +20,7 @@ export default function Tenants() {
   const [pendingDelete, setPendingDelete] = useState(null);
 
   const reload = () =>
-    Promise.all([listTenants(), listInvoices()])
+    Promise.all([fetchTenants(), fetchInvoices()])
       .then(([t, i]) => { setTenants(t); setInvoices(i); })
       .catch(() => {});
 
@@ -50,7 +50,7 @@ export default function Tenants() {
 
   const handleDelete = async () => {
     if (!pendingDelete) return;
-    await deleteTenant(pendingDelete.id);
+    await removeTenant(pendingDelete.id);
     toast.success(`Tenant ${pendingDelete.name} removed (invoices are kept)`);
     setPendingDelete(null);
     reload();

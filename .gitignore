@@ -85,6 +85,13 @@ frontend/node_modules/.cache/default-development/6.pack
 .env.*
 *.env
 !.env.example
+backend/data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
 credentials.json
 *.key
 .credentials
@@ -92,3 +99,4 @@ frontend/node_modules/.cache/default-development/0.pack
 frontend/node_modules/.cache/default-development/1.pack
 frontend/node_modules/.cache/default-development/2.pack
 frontend/node_modules/.cache/default-development/3.pack
+frontend/node_modules/.cache/default-development/4.pack

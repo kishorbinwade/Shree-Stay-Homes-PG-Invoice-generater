@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { FileText, IndianRupee, Wallet, Clock3, FilePlus2, ArrowRight } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
-import { listInvoices } from '../lib/db';
+import { fetchInvoices } from '../lib/api';
 import { inr, currentMonth, monthLabel, fmtDate } from '../lib/format';
 import { Button } from '../components/ui/button';
 
@@ -41,7 +41,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    listInvoices()
+    fetchInvoices()
       .then(setInvoices)
       .catch(() => {})
       .finally(() => setLoading(false));

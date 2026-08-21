@@ -7,9 +7,9 @@ import {
 } from 'lucide-react';
 import { useSettings } from '../context/SettingsContext';
 import {
-  allocateInvoiceNumber, peekInvoiceNumber, getInvoice, putInvoice,
-  upsertTenantFromInvoice, getTenant,
-} from '../lib/db';
+  fetchInvoice, fetchTenant, createInvoice as apiCreateInvoice,
+  updateInvoice as apiUpdateInvoice, peekNextNumber,
+} from '../lib/api';
 import { buildInvoicePDF, downloadPDF, printPDF } from '../lib/pdf';
 import { deliverInvoiceEmail } from '../lib/api';
 import { inr, num, todayISO, currentMonth, computeTotals, paymentStatusOf, PAYMENT_MODES } from '../lib/format';
@@ -61,13 +61,13 @@ export default function CreateInvoice() {
   const [editId, setEditId] = useState(null);
 
   useEffect(() => {
-    peekInvoiceNumber(settings).then(setNextNumber).catch(() => {});
-  }, [settings]);
+    peekNextNumber().then((d) => setNextNumber(d.nextNumber)).catch(() => {});
+  }, [result?.invoiceNumber]);
 
   useEffect(() => {
     const load = async () => {
       if (id) {
-        const inv = await getInvoice(id);
+        const inv = await fetchInvoice(id);
         if (inv) {
           setForm({ ...EMPTY, ...inv, sendToTenant: !!inv.sendToTenant, allowAdvance: Number(inv.amountPaid) > Number(inv.total) });
           setResult(inv);
@@ -77,13 +77,13 @@ export default function CreateInvoice() {
           navigate('/history');
         }
       } else if (searchParams.get('from')) {
-        const src = await getInvoice(searchParams.get('from'));
+        const src = await fetchInvoice(searchParams.get('from'));
         if (src) {
           setForm({ ...EMPTY, ...src, amountPaid: '', transactionId: '', paymentMode: 'Cash', sendToTenant: false });
           toast.success('Invoice duplicated — adjust details and generate');
         }
       } else if (searchParams.get('tenant')) {
-        const t = await getTenant(searchParams.get('tenant'));
+        const t = await fetchTenant(searchParams.get('tenant'));
         if (t) {
           setForm((f) => ({
             ...f, tenantName: t.name, tenantEmail: t.email, tenantMobile: t.mobile,
@@ -153,7 +153,7 @@ export default function CreateInvoice() {
         ...invoice,
         emailStatus: { owner: res.owner, tenant: res.tenant, at: new Date().toISOString() },
       };
-      await putInvoice(updated);
+      await apiUpdateInvoice(invoice.id, updated);
       setResult(updated);
       if (res.owner === 'sent') toast.success(`Invoice emailed to owner (${settings.ownerEmail}) with PDF attached`);
       else toast.error(res.errors?.owner || 'Owner email failed — use Retry Email');
@@ -164,7 +164,7 @@ export default function CreateInvoice() {
       }
     } catch (err) {
       const updated = { ...invoice, emailStatus: { owner: 'failed', tenant: invoice.sendToTenant ? 'failed' : 'skipped', error: err.message } };
-      await putInvoice(updated);
+      await apiUpdateInvoice(invoice.id, updated);
       setResult(updated);
       toast.error(err.message || 'Email failed');
     } finally {
@@ -181,16 +181,21 @@ export default function CreateInvoice() {
     }
     setSaving(true);
     try {
-      const number = editId && result ? result.invoiceNumber : await allocateInvoiceNumber(settings);
-      const invoice = buildInvoice(number, editId ? result : null);
-      await putInvoice(invoice);
-      await upsertTenantFromInvoice(invoice);
-      setResult(invoice);
-      setEditId(invoice.id);
-      peekInvoiceNumber(settings).then(setNextNumber).catch(() => {});
-      toast.success(`Invoice ${number} generated and saved locally`);
+      const payload = {
+        ...form,
+        rent: num(form.rent), securityDeposit: num(form.securityDeposit), electricity: num(form.electricity),
+        food: num(form.food), maintenance: num(form.maintenance), otherCharges: num(form.otherCharges),
+        discount: num(form.discount), previousBalance: num(form.previousBalance), amountPaid: num(form.amountPaid),
+        tenantName: form.tenantName.trim(), tenantEmail: form.tenantEmail.trim(), tenantMobile: form.tenantMobile.trim(),
+        invoiceDate: result?.invoiceDate || todayISO(),
+      };
+      const saved = editId ? await apiUpdateInvoice(editId, payload) : await apiCreateInvoice(payload);
+      setResult(saved);
+      setEditId(saved.id);
+      peekNextNumber().then((d) => setNextNumber(d.nextNumber)).catch(() => {});
+      toast.success(`Invoice ${saved.invoiceNumber} generated and saved`);
       if (settings.autoOwnerEmail || (settings.tenantEmailEnabled && form.sendToTenant)) {
-        await runEmail(invoice);
+        await runEmail(saved);
       }
     } catch (err) {
       toast.error(err.message || 'Failed to generate invoice');

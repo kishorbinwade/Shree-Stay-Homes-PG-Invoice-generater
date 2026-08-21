@@ -1,0 +1,35 @@
+{
+  "summary": "Iteration 5 full regression after IndexedDB → SQLite migration. Backend pytest tests/backend_test.py: 16/16 passed in serial (-n 0). Live API on preview URL fully validated: sequential SHPG-YYYY-NNNN allocation atomic (created 0003, 0004 back-to-back, distinct); GET/PUT/DELETE work; PUT keeps same invoice number; filters q/month/status/order return correct results; /api/invoices/next-number correct after each op; tenants auto-created (T1_API_Alpha/Bravo, T1_UI_Test); settings GET/PUT roundtrip persists; backup export JSON+CSV both work (CSV Content-Type text/csv, 913B); import mode=merge skips duplicates (0 added, 3 skipped on re-import); after DELETE /api/data + import from snapshot, next-number = SHPG-2026-0004 (max(imported)+1) — sequence continues, does NOT reset to 0001; persistence across `supervisorctl restart backend` verified (3 invoices retained, next-number stable). Security: /api/settings and /api/backup/export contain NO SMTP_APP_PASSWORD/password/secret; backend/.env NOT tracked in git (only backend/.env.example is). Frontend E2E on 6 routes /, /invoices/new, /history, /tenants, /settings, /backup — zero pageerrors; only 1 console 503 which is the intentional SMTP-unconfigured signal. Create-invoice flow: next-invoice-number displayed (SHPG-2026-0004), tenant-name/mobile/charge-rent fields work, generate-invoice-btn → generate-success-message shown, email-status-owner=Failed, retry-email-btn present. History table shows 4 rows, search filter narrows to 1 for T1_UI_Test, sort toggle works. Tenants page lists new tenant. Backup page shows export-json-btn, export-csv-btn, delete-all-data-btn. backend-offline-banner correctly hidden. IndexedDB.databases() returns [] before AND after full app usage → legacy shree-stay-pg-db is NOT recreated (owner-approved deletion works). No dashboard/history/backup crashes.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "verifications": {
+    "pytest": "16 passed, 0 failed (serial -n 0)",
+    "atomic_invoice_numbers": "0003 and 0004 assigned back-to-back with no duplicates",
+    "put_keeps_number": true,
+    "filters_q_month_status_order": true,
+    "persistence_across_backend_restart": true,
+    "csv_export_status_type": "200 text/csv",
+    "import_merge_skips_duplicates": "invoices_added=0 invoices_skipped=3",
+    "sequence_preserved_after_delete_all_import": "next=SHPG-2026-0004 (max imported +1), not 0001",
+    "smtp_503_expected_behavior": true,
+    "indexeddb_shree_stay_pg_db_not_recreated": true,
+    "no_secrets_in_api_bodies": true,
+    "backend_env_not_tracked_in_git": true,
+    "pageerrors_on_6_routes": 0
+  },
+  "test_report_links": ["/app/backend/tests/backend_test.py", "/app/test_reports/pytest/iter5.xml"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "create_invoice uses BEGIN IMMEDIATE + ON CONFLICT DO UPDATE on meta table — correctly prevents duplicate invoice numbers under concurrency (verified by test_concurrent_invoice_creation).",
+    "import_data calls _recompute_sequences which only advances sequences based on invoice_number regex (max +1); the JSON's `sequences` field is intentionally ignored — correct defensive behavior since imported invoice_numbers are the ground truth.",
+    "clear_all wipes meta including sequences; peek_next_number then relies on startingNumber floor. Acceptable.",
+    "server.py backup/export.csv route is GET-only (405 on HEAD, 200 on GET) — expected."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "None required. SMTP intentionally unconfigured; 503 is expected.",
+  "seed_data_creation": "Test seed on preview SQLite DB: created via API T1_API_Alpha (SHPG-2026-0003, later updated) and via UI T1_UI_Test (SHPG-2026-0004). Also touched settings.notes then restored default. Pre-existing 0001/0002 (Smoke Test/SQLite Test) retained.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Migration to SQLite is fully working end-to-end. Preview SQLite at backend/data/pg_billing.db currently holds 4 invoices (SHPG-2026-0001..0004). SMTP stays intentionally unconfigured in this pod — /api/email/invoice returns 503 and UI shows email-status-owner=Failed with retry-email-btn; this is by design. Legacy IndexedDB deletion is verified: indexedDB.databases() returns [] even after full UI walkthrough."
+}

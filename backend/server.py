@@ -1,4 +1,6 @@
-from fastapi import FastAPI, APIRouter, HTTPException
+from datetime import datetime
+from fastapi import FastAPI, APIRouter, HTTPException, Body
+from fastapi.responses import JSONResponse, Response
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 import os
@@ -10,7 +12,7 @@ from html.parser import HTMLParser
 from urllib.parse import urlparse
 from pathlib import Path
 from typing import Optional
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, field_validator, model_validator
 import asyncio
 import base64
 import smtplib
@@ -22,6 +24,8 @@ from email.utils import formataddr
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
+
+import database as db
 
 app = FastAPI()
 api_router = APIRouter(prefix="/api")
@@ -257,6 +261,196 @@ async def email_invoice(payload: InvoiceEmailRequest):
         else:
             result["tenant"] = "no-email"
     return result
+
+
+# ---------- Billing data API (SQLite) ----------
+
+EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+
+
+class InvoiceIn(BaseModel):
+    tenantName: str
+    tenantEmail: Optional[str] = ""
+    tenantMobile: str = ""
+    roomNumber: str = ""
+    bedNumber: str = ""
+    checkIn: str = ""
+    checkOut: str = ""
+    occupation: str = ""
+    emergencyContact: str = ""
+    invoiceDate: Optional[str] = None
+    billingMonth: str = ""
+    dueDate: str = ""
+    rent: float = 0
+    securityDeposit: float = 0
+    electricity: float = 0
+    food: float = 0
+    maintenance: float = 0
+    otherCharges: float = 0
+    discount: float = 0
+    previousBalance: float = 0
+    amountPaid: float = 0
+    paymentMode: str = "Cash"
+    transactionId: str = ""
+    sendToTenant: bool = False
+    emailStatus: Optional[dict] = None
+    notes: str = ""
+
+    @field_validator("tenantEmail")
+    @classmethod
+    def _email_ok(cls, v):
+        v = (v or "").strip()
+        if v and not EMAIL_RE.match(v):
+            raise ValueError("Invalid tenant email address")
+        return v
+
+    @model_validator(mode="after")
+    def _amounts_ok(self):
+        for k in ("rent", "securityDeposit", "electricity", "food", "maintenance",
+                  "otherCharges", "discount", "previousBalance", "amountPaid"):
+            if getattr(self, k) < 0:
+                raise ValueError(f"{k} cannot be negative")
+        if not self.tenantName.strip():
+            raise ValueError("Tenant name is required")
+        return self
+
+
+class MigratePayload(BaseModel):
+    invoices: list = []
+    tenants: list = []
+    settings: Optional[dict] = None
+
+
+@api_router.get("/invoices/next-number")
+async def api_next_number():
+    return {"nextNumber": db.peek_next_number()}
+
+
+@api_router.get("/invoices")
+async def api_list_invoices(q: Optional[str] = None, month: Optional[str] = None,
+                            status: Optional[str] = None, order: str = "desc"):
+    return db.list_invoices(q=q, month=month, status=status, order=order)
+
+
+@api_router.post("/invoices", status_code=201)
+async def api_create_invoice(payload: InvoiceIn):
+    return db.create_invoice(payload.model_dump())
+
+
+@api_router.get("/invoices/{inv_id}")
+async def api_get_invoice(inv_id: str):
+    inv = db.get_invoice(inv_id)
+    if not inv:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    return inv
+
+
+@api_router.put("/invoices/{inv_id}")
+async def api_update_invoice(inv_id: str, payload: InvoiceIn):
+    inv = db.update_invoice(inv_id, payload.model_dump())
+    if not inv:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    return inv
+
+
+@api_router.delete("/invoices/{inv_id}")
+async def api_delete_invoice(inv_id: str):
+    if not db.delete_invoice(inv_id):
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    return {"deleted": True}
+
+
+@api_router.get("/tenants")
+async def api_list_tenants():
+    return db.list_tenants()
+
+
+@api_router.get("/tenants/{tid}")
+async def api_get_tenant(tid: str):
+    t = db.get_tenant(tid)
+    if not t:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    return t
+
+
+@api_router.delete("/tenants/{tid}")
+async def api_delete_tenant(tid: str):
+    if not db.delete_tenant(tid):
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    return {"deleted": True}
+
+
+@api_router.get("/settings")
+async def api_get_settings():
+    return db.get_settings()
+
+
+@api_router.put("/settings")
+async def api_put_settings(payload: dict = Body(...)):
+    return db.save_settings(payload)
+
+
+CSV_COLUMNS = [
+    ("Invoice Number", "invoiceNumber"), ("Invoice Date", "invoiceDate"),
+    ("Billing Month", "billingMonth"), ("Tenant Name", "tenantName"),
+    ("Tenant Email", "tenantEmail"), ("Mobile", "tenantMobile"),
+    ("Room", "roomNumber"), ("Bed", "bedNumber"), ("Check-in", "checkIn"),
+    ("Check-out", "checkOut"), ("Rent", "rent"), ("Security Deposit", "securityDeposit"),
+    ("Electricity", "electricity"), ("Food", "food"), ("Maintenance", "maintenance"),
+    ("Other Charges", "otherCharges"), ("Previous Balance", "previousBalance"),
+    ("Discount", "discount"), ("Subtotal", "subtotal"), ("Total", "total"),
+    ("Amount Paid", "amountPaid"), ("Balance Due", "balanceDue"),
+    ("Payment Mode", "paymentMode"), ("Transaction ID", "transactionId"),
+    ("Payment Status", "paymentStatus"), ("Created At", "createdAt"),
+    ("Updated At", "updatedAt"),
+]
+
+
+def _csv_cell(v) -> str:
+    s = "" if v is None else str(v)
+    return f'"{s.replace(chr(34), chr(34) * 2)}"' if any(c in s for c in '",\n') else s
+
+
+def invoices_to_csv(invoices) -> str:
+    lines = [",".join(h for h, _ in CSV_COLUMNS)]
+    for inv in invoices:
+        lines.append(",".join(_csv_cell(inv.get(k)) for _, k in CSV_COLUMNS))
+    return "\n".join(lines)
+
+
+@api_router.get("/backup/export")
+async def api_backup_export():
+    name = f"ShreeStayHomesPG_Backup_{datetime.now().date().isoformat()}.json"
+    return JSONResponse(db.export_data(),
+                        headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+@api_router.get("/backup/export.csv")
+async def api_backup_export_csv():
+    name = f"ShreeStayHomesPG_Invoices_{datetime.now().date().isoformat()}.csv"
+    return Response(content=invoices_to_csv(db.list_invoices()), media_type="text/csv",
+                    headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+@api_router.post("/backup/import")
+async def api_backup_import(payload: dict = Body(...), mode: str = "merge"):
+    if mode not in ("merge", "overwrite"):
+        raise HTTPException(status_code=400, detail="mode must be 'merge' or 'overwrite'")
+    try:
+        return db.import_data(payload, mode=mode)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@api_router.post("/migrate")
+async def api_migrate(payload: MigratePayload):
+    counts = db.import_data(payload.model_dump(), mode="merge")
+    return {**counts, **db.counts()}
+
+
+@api_router.delete("/data")
+async def api_delete_all_data():
+    return {"cleared": True, **db.clear_all()}
 
 
 app.include_router(api_router)
