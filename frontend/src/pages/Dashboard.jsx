@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { FileText, IndianRupee, Wallet, Clock3, FilePlus2, ArrowRight } from 'lucide-react';
+import { FileText, IndianRupee, Wallet, Clock3, FilePlus2, ArrowRight, BedDouble, AlarmClock, UtensilsCrossed, TrendingUp } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
-import { fetchInvoices } from '../lib/api';
+import { fetchInvoices, fetchDashboardStats } from '../lib/api';
 import { inr, currentMonth, monthLabel, fmtDate } from '../lib/format';
 import { Button } from '../components/ui/button';
 
@@ -38,6 +38,7 @@ function StatusBadge({ status }) {
 
 export default function Dashboard() {
   const [invoices, setInvoices] = useState([]);
+  const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -45,20 +46,8 @@ export default function Dashboard() {
       .then(setInvoices)
       .catch(() => {})
       .finally(() => setLoading(false));
+    fetchDashboardStats().then(setStats).catch(() => {});
   }, []);
-
-  const stats = useMemo(() => {
-    const cm = currentMonth();
-    const sum = (fn) => invoices.reduce((a, i) => a + fn(i), 0);
-    return {
-      count: invoices.length,
-      billed: sum((i) => Number(i.total) || 0),
-      collected: sum((i) => Math.min(Number(i.amountPaid) || 0, Number(i.total) || 0)),
-      pending: sum((i) => Math.max(Number(i.balanceDue) || 0, 0)),
-      monthCollected: sum((i) => (i.billingMonth === cm ? Math.min(Number(i.amountPaid) || 0, Number(i.total) || 0) : 0)),
-      monthPending: sum((i) => (i.billingMonth === cm ? Math.max(Number(i.balanceDue) || 0, 0) : 0)),
-    };
-  }, [invoices]);
 
   const chartData = useMemo(() => {
     const months = [];
@@ -95,10 +84,17 @@ export default function Dashboard() {
       </div>
 
       <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-4">
-        <StatCard icon={FileText} label="Total Invoices" value={stats.count} delay={0} testId="stat-total-invoices" />
-        <StatCard icon={IndianRupee} label="Total Billed" value={inr(stats.billed)} delay={0.05} testId="stat-total-billed" />
-        <StatCard icon={Wallet} label="Total Collected" value={inr(stats.collected)} sub={`This month: ${inr(stats.monthCollected)}`} delay={0.1} testId="stat-total-collected" />
-        <StatCard icon={Clock3} label="Total Pending" value={inr(stats.pending)} sub={`This month: ${inr(stats.monthPending)}`} delay={0.15} testId="stat-total-pending" />
+        <StatCard icon={FileText} label="Total Invoices" value={stats?.totalInvoices ?? '—'} delay={0} testId="stat-total-invoices" />
+        <StatCard icon={IndianRupee} label="Total Billed" value={stats ? inr(stats.totalBilled) : '—'} sub={`This month: ${stats ? inr(stats.monthBilled) : '—'}`} delay={0.05} testId="stat-total-billed" />
+        <StatCard icon={Wallet} label="Total Collected" value={stats ? inr(stats.totalCollected) : '—'} sub={`This month: ${stats ? inr(stats.monthCollected) : '—'}`} delay={0.1} testId="stat-total-collected" />
+        <StatCard icon={Clock3} label="Total Pending" value={stats ? inr(stats.totalPending) : '—'} sub={`This month: ${stats ? inr(stats.monthPending) : '—'}`} delay={0.15} testId="stat-total-pending" />
+      </div>
+
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-4">
+        <StatCard icon={BedDouble} label="Occupancy" value={stats ? `${stats.occupiedRooms} rooms · ${stats.activeTenants} tenants` : '—'} delay={0.2} testId="stat-occupancy" />
+        <StatCard icon={AlarmClock} label="Overdue Amount" value={stats ? inr(stats.overdueAmount) : '—'} sub={stats ? `${stats.overdueCount} overdue invoice(s)` : ''} delay={0.25} testId="stat-overdue" />
+        <StatCard icon={UtensilsCrossed} label="Food Today" value={stats ? `${stats.foodOrdersToday} meals` : '—'} sub={`This month: ${stats ? inr(stats.foodRevenueMonth) : '—'}`} delay={0.3} testId="stat-food-today" />
+        <StatCard icon={TrendingUp} label="Net Profit (Month)" value={stats ? inr(stats.netProfitMonth) : '—'} sub={`Expenses: ${stats ? inr(stats.expensesMonth) : '—'}`} delay={0.35} testId="stat-net-profit" />
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">

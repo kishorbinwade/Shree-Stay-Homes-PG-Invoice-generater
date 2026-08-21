@@ -337,6 +337,11 @@ async def api_create_invoice(payload: InvoiceIn):
     return db.create_invoice(payload.model_dump())
 
 
+@api_router.get("/invoices/overdue")
+async def api_overdue():
+    return db.overdue_invoices()
+
+
 @api_router.get("/invoices/{inv_id}")
 async def api_get_invoice(inv_id: str):
     inv = db.get_invoice(inv_id)
@@ -451,6 +456,199 @@ async def api_migrate(payload: MigratePayload):
 @api_router.delete("/data")
 async def api_delete_all_data():
     return {"cleared": True, **db.clear_all()}
+
+
+# ---------- Expenses / Food / Billing / Overdue / Reports / Import ----------
+
+class ExpenseIn(BaseModel):
+    date: Optional[str] = None
+    category: str = "Other"
+    description: str = ""
+    amount: float = 0
+    paymentMethod: str = "Cash"
+    reference: str = ""
+
+    @model_validator(mode="after")
+    def _amount_ok(self):
+        if self.amount < 0:
+            raise ValueError("Amount cannot be negative")
+        if self.amount == 0:
+            raise ValueError("Amount is required")
+        return self
+
+
+class FoodOrderIn(BaseModel):
+    tenantId: str = ""
+    tenantName: str
+    date: Optional[str] = None
+    mealType: str = "Lunch"
+    quantity: float = 1
+    pricePerMeal: float = 0
+    status: str = "Ordered"
+    note: str = ""
+
+    @model_validator(mode="after")
+    def _ok(self):
+        if not self.tenantName.strip():
+            raise ValueError("Tenant name is required")
+        if self.mealType not in ("Breakfast", "Lunch", "Dinner"):
+            raise ValueError("Invalid meal type")
+        if self.quantity <= 0 or self.pricePerMeal < 0:
+            raise ValueError("Invalid quantity or price")
+        if self.status not in ("Ordered", "Served", "Cancelled"):
+            raise ValueError("Invalid status")
+        return self
+
+
+class TenantUpdate(BaseModel):
+    name: Optional[str] = None
+    mobile: Optional[str] = None
+    email: Optional[str] = None
+    occupation: Optional[str] = None
+    emergencyContact: Optional[str] = None
+    emergencyContactRelationship: Optional[str] = None
+    company: Optional[str] = None
+    permanentAddress: Optional[str] = None
+    idType: Optional[str] = None
+    idNumber: Optional[str] = None
+    dateOfBirth: Optional[str] = None
+    joiningDate: Optional[str] = None
+    roomNumber: Optional[str] = None
+    bedNumber: Optional[str] = None
+    checkIn: Optional[str] = None
+    checkOut: Optional[str] = None
+    status: Optional[str] = None
+    rent: Optional[float] = None
+    deposit: Optional[float] = None
+
+
+class BillingGenerateIn(BaseModel):
+    month: str
+    dueDate: str = ""
+    rows: list = []
+
+
+class CsvPreviewIn(BaseModel):
+    filename: str = "upload.csv"
+    csvText: str
+
+
+class CsvCommitIn(BaseModel):
+    filename: str = "upload.csv"
+    csvText: str
+    mapping: dict = {}
+    decisions: dict = {}
+
+
+@api_router.get("/expenses")
+async def api_list_expenses(month: Optional[str] = None, dateFrom: Optional[str] = None,
+                            dateTo: Optional[str] = None):
+    return db.list_expenses(month=month, date_from=dateFrom, date_to=dateTo)
+
+
+@api_router.post("/expenses", status_code=201)
+async def api_create_expense(payload: ExpenseIn):
+    return db.create_expense(payload.model_dump())
+
+
+@api_router.delete("/expenses/{eid}")
+async def api_delete_expense(eid: str):
+    if not db.delete_expense(eid):
+        raise HTTPException(status_code=404, detail="Expense not found")
+    return {"deleted": True}
+
+
+@api_router.get("/food-orders")
+async def api_list_food(date: Optional[str] = None, month: Optional[str] = None):
+    return db.list_food_orders(date=date, month=month)
+
+
+@api_router.post("/food-orders", status_code=201)
+async def api_create_food(payload: FoodOrderIn):
+    return db.create_food_order(payload.model_dump())
+
+
+@api_router.put("/food-orders/{fid}")
+async def api_update_food(fid: str, payload: FoodOrderIn):
+    rec = db.update_food_order(fid, payload.model_dump())
+    if not rec:
+        raise HTTPException(status_code=404, detail="Food order not found")
+    return rec
+
+
+@api_router.delete("/food-orders/{fid}")
+async def api_delete_food(fid: str):
+    if not db.delete_food_order(fid):
+        raise HTTPException(status_code=404, detail="Food order not found")
+    return {"deleted": True}
+
+
+@api_router.get("/food-orders/today")
+async def api_food_today(date: Optional[str] = None):
+    return db.food_today(date or datetime.now().date().isoformat())
+
+
+@api_router.get("/food-orders/summary")
+async def api_food_summary(month: Optional[str] = None):
+    return db.food_summary(month or datetime.now().date().isoformat()[:7])
+
+
+@api_router.put("/tenants/{tid}")
+async def api_update_tenant(tid: str, payload: TenantUpdate):
+    t = db.update_tenant(tid, payload.model_dump(exclude_none=True))
+    if not t:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    return t
+
+
+@api_router.get("/billing/preview")
+async def api_billing_preview(month: str):
+    if not re.match(r"^\d{4}-\d{2}$", month or ""):
+        raise HTTPException(status_code=422, detail="month must be YYYY-MM")
+    return db.billing_preview(month)
+
+
+@api_router.post("/billing/generate")
+async def api_billing_generate(payload: BillingGenerateIn):
+    if not re.match(r"^\d{4}-\d{2}$", payload.month or ""):
+        raise HTTPException(status_code=422, detail="month must be YYYY-MM")
+    return db.billing_generate(payload.month, payload.rows, payload.dueDate)
+
+
+@api_router.get("/reports/monthly")
+async def api_report(month: Optional[str] = None, dateFrom: Optional[str] = None,
+                     dateTo: Optional[str] = None):
+    return db.monthly_report(month=month, date_from=dateFrom, date_to=dateTo)
+
+
+@api_router.get("/dashboard/stats")
+async def api_dashboard_stats():
+    return db.dashboard_stats()
+
+
+@api_router.post("/imports/preview")
+async def api_import_preview(payload: CsvPreviewIn):
+    if len(payload.csvText) > 5_000_000:
+        raise HTTPException(status_code=413, detail="CSV too large")
+    try:
+        return db.csv_preview(payload.filename, payload.csvText)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@api_router.post("/imports/commit")
+async def api_import_commit(payload: CsvCommitIn):
+    if len(payload.csvText) > 5_000_000:
+        raise HTTPException(status_code=413, detail="CSV too large")
+    try:
+        return db.csv_commit(payload.filename, payload.csvText, payload.mapping, payload.decisions)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@api_router.get("/imports")
+async def api_imports():
+    return db.list_imports()
 
 
 app.include_router(api_router)

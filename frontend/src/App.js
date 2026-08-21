@@ -8,6 +8,14 @@ import History from "@/pages/History";
 import Tenants from "@/pages/Tenants";
 import Settings from "@/pages/Settings";
 import Backup from "@/pages/Backup";
+import MonthlyBilling from "@/pages/MonthlyBilling";
+import Overdue from "@/pages/Overdue";
+import FoodOrders from "@/pages/FoodOrders";
+import Expenses from "@/pages/Expenses";
+import Reports from "@/pages/Reports";
+import ImportCSV from "@/pages/ImportCSV";
+import RoomsBeds from "@/pages/RoomsBeds";
+import Payments from "@/pages/Payments";
 import { Toaster } from "@/components/ui/sonner";
 
 function App() {
@@ -21,6 +29,14 @@ function App() {
             <Route path="/invoices/new" element={<CreateInvoice />} />
             <Route path="/invoices/:id/edit" element={<CreateInvoice />} />
             <Route path="/history" element={<History />} />
+            <Route path="/billing" element={<MonthlyBilling />} />
+            <Route path="/overdue" element={<Overdue />} />
+            <Route path="/food" element={<FoodOrders />} />
+            <Route path="/expenses" element={<Expenses />} />
+            <Route path="/reports" element={<Reports />} />
+            <Route path="/import" element={<ImportCSV />} />
+            <Route path="/rooms" element={<RoomsBeds />} />
+            <Route path="/payments" element={<Payments />} />
             <Route path="/tenants" element={<Tenants />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/backup" element={<Backup />} />

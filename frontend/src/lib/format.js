@@ -49,3 +49,21 @@ export function paymentStatusOf(total, amountPaid) {
 }
 
 export const PAYMENT_MODES = ['Cash', 'UPI', 'Bank Transfer', 'Other'];
+
+export function waReminderLink(inv, businessName) {
+  let digits = String(inv.tenantMobile || '').replace(/\D/g, '');
+  if (digits.length === 10) digits = `91${digits}`;
+  const lines = [
+    `Hello ${inv.tenantName},`,
+    '',
+    `Your PG payment for ${monthLabel(inv.billingMonth)} is pending.`,
+    `Invoice: ${inv.invoiceNumber}`,
+    `Total: ${inrPlain(inv.total)}`,
+    `Paid: ${inrPlain(inv.amountPaid)}`,
+    `Pending: ${inrPlain(Math.max(Number(inv.balanceDue) || 0, 0))}`,
+  ];
+  if (inv.dueDate) lines.push(`Due date: ${fmtDate(inv.dueDate)}`);
+  lines.push('', 'Please make the pending payment at your earliest convenience.', 'Thank you,',
+    (businessName || 'SHREE STAY HOMES & PG').split(' ').map((w) => w.charAt(0) + w.slice(1).toLowerCase()).join(' '));
+  return `https://wa.me/${digits}?text=${encodeURIComponent(lines.join('\n'))}`;
+}

@@ -27,16 +27,23 @@ Linux PC
 
 ## Features
 
-- **Dashboard** — total invoices, billed, collected, pending; current-month collection & pending; 6-month billed-vs-collected chart; recent invoices
+- **Dashboard** — total invoices, billed, collected, pending; current-month values; occupancy, overdue amount, food orders today, monthly expenses & net profit; 6-month billed-vs-collected chart; recent invoices
+- **Monthly Billing** — generate invoices for all active tenants at once: rent, actual food consumption (from food orders), electricity, maintenance, auto-carried previous balance, discount; editable preview before generating; duplicate monthly invoices for the same tenant + month are prevented
+- **Overdue Tracking** — due-date-based buckets: Overdue (with days overdue), Due Today, Upcoming, with pending amounts
+- **WhatsApp Payment Reminders** — opens WhatsApp with a pre-filled message (invoice, totals, due date) to the tenant's mobile. No WhatsApp API/server; the owner taps send
+- **Food Orders (on-demand)** — Breakfast/Lunch/Dinner per tenant (quantity, price, status: Ordered/Served/Cancelled); today's-meals dashboard with date filter; daily orders → monthly food total → automatically billed in Monthly Billing; cancelled orders never billed
+- **Expenses & Profit** — categorized expenses; monthly/date-range reports: revenue, expenses, Net Profit = Revenue − Expenses; food revenue vs food expense vs food profit; CSV export
+- **Google Forms CSV Import** — no Google API needed: download form responses as CSV → auto column detection & field mapping (manual override per column) → validated preview (new/duplicate/invalid) → import into local SQLite. Duplicate protection by mobile/email with explicit Skip or Update-Existing (shows exact field changes first). Import history stored with per-row details. Imported tenants start as "Pending Admission" until room/bed/rent are assigned
 - **Create Invoice** — tenant details, room/bed, check-in/out, itemized charges (rent, deposit, electricity, food, maintenance, other, discount, previous balance); instant Subtotal → Discount → Total → Paid → Balance; auto payment status; advance-payment guard
 - **Sequential invoice numbers** — `SHPG-2026-0001`, `0002`, … allocated atomically inside a SQLite transaction (`BEGIN IMMEDIATE`), so numbers never duplicate — even across restarts or restores
 - **Watermarked PDF** — professional A4 invoice (logo, address, GSTIN, itemized charges, payment details, authorized signature) with embedded diagonal watermark + footer on every page; multi-page; ₹ glyph embedded; generated locally in the browser
 - **Email via Gmail SMTP** — every invoice PDF is emailed to the owner (`shreehomestaypg@gmail.com`) by default; optional tenant copy; real PDF attachment; per-recipient status with retry; clear errors for auth failure / no internet
-- **Invoice History** — server-side search (tenant / invoice no), month & status filters, date sorting; view, download, print, resend email, duplicate, edit (same number), delete with confirmation
-- **Tenants** — auto-built from invoices with billed/pending aggregates; one-click prefilled new invoice
+- **Invoice History** — server-side search (tenant / invoice no), month & status filters, date sorting; view, download, print, resend email, WhatsApp reminder, duplicate, edit (same number), delete with confirmation
+- **Tenants & Rooms/Beds** — tenant profiles with aggregates; room/bed/rent/deposit/joining assignment; Pending Admission → Active workflow
+- **Payments** — payment ledger across invoices (mode, transaction ID/UTR, balances)
 - **Settings** — business info, logo & signature upload, owner email, email toggles, invoice prefix & starting number, terms, notes, watermark text — stored in SQLite
-- **Backup & Restore** — export everything as JSON or invoices as CSV; validated merge-import (existing records are never silently overwritten; duplicates skipped; numbering sequence preserved); Delete All Data behind a strong confirmation
-- **PWA / Offline** — installable app shell, service-worker caching, offline indicator
+- **Backup & Restore** — export everything as JSON (invoices, tenants, expenses, food orders, import history, settings, sequences) or invoices as CSV; validated merge-import (existing records never silently overwritten; duplicates skipped; numbering sequence preserved); Delete All Data behind a strong confirmation
+- **PWA / Offline** — installable app shell, service-worker caching, offline indicator; everything except Gmail email works offline
 
 ---
 
@@ -144,16 +151,30 @@ The App Password is **never** sent to the React frontend, never stored in SQLite
 GET    /api/invoices?q=&month=&status=&order=     list / search / filter / sort
 POST   /api/invoices                              create (atomic sequential number)
 GET    /api/invoices/next-number                  preview next number
+GET    /api/invoices/overdue                      overdue / due-today / upcoming buckets
 GET    /api/invoices/{id}                         fetch one
 PUT    /api/invoices/{id}                         update (number never changes)
 DELETE /api/invoices/{id}                         delete
 GET    /api/tenants  /api/tenants/{id}            list / fetch
+PUT    /api/tenants/{id}                          assign room/bed/rent/status
 DELETE /api/tenants/{id}                          remove (invoices kept)
+GET    /api/billing/preview?month=                per-tenant monthly billing preview
+POST   /api/billing/generate                      bulk-generate monthly invoices
+GET    /api/food-orders?date=|month=              food orders
+POST/PUT/DELETE /api/food-orders[/{id}]           food order CRUD
+GET    /api/food-orders/today?date=               today's meals by type
+GET    /api/food-orders/summary?month=            monthly food totals per tenant
+GET    /api/expenses?month=|dateFrom=|dateTo=     expenses
+POST/DELETE /api/expenses[/{id}]                  expense CRUD
+GET    /api/reports/monthly                       revenue / expenses / net profit / food
+GET    /api/dashboard/stats                       dashboard aggregates
+POST   /api/imports/preview                       parse CSV + auto-map + validate
+POST   /api/imports/commit                        import with duplicate decisions
+GET    /api/imports                               import history
 GET    /api/settings   PUT /api/settings          settings in SQLite
 GET    /api/backup/export                         full JSON backup download
 GET    /api/backup/export.csv                     invoices CSV download
 POST   /api/backup/import?mode=merge|overwrite    validated restore
-POST   /api/migrate                               IndexedDB → SQLite migration
 DELETE /api/data                                  wipe all (confirmed in UI)
 POST   /api/email/invoice                         Gmail SMTP send with PDF
 ```

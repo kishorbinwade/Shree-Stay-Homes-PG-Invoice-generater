@@ -182,5 +182,144 @@ def test_email_503_when_smtp_not_configured():
 def test_no_secrets_in_api_responses():
     for path in ("/api/settings", "/api/invoices", "/api/backup/export"):
         body = client.get(path).text
-        assert "SMTP_APP_PASSWORD" not in body and "smtp" not in body.lower() or True
         assert "APP_PASSWORD" not in body
+
+
+# ---------- new modules: expenses / food / billing / overdue / import ----------
+
+def test_expense_crud_and_profit():
+    e = client.post("/api/expenses", json={
+        "date": "2026-08-10", "category": "Food ingredients", "description": "Rice", "amount": 1000})
+    assert e.status_code == 201, e.text
+    eid = e.json()["id"]
+    client.post("/api/expenses", json={"date": "2026-08-11", "category": "Repairs", "amount": 500})
+    assert client.post("/api/expenses", json={"amount": -5}).status_code == 422
+    exps = client.get("/api/expenses", params={"month": "2026-08"}).json()
+    assert any(x["id"] == eid for x in exps)
+    rep = client.get("/api/reports/monthly", params={"month": "2026-08"}).json()
+    assert rep["expenses"] >= 1500
+    assert rep["netProfit"] == round(rep["revenue"] - rep["expenses"], 2)
+    assert rep["foodExpenses"] >= 1000
+    assert client.delete(f"/api/expenses/{eid}").json()["deleted"] is True
+
+
+def test_food_order_flow_and_monthly_aggregation():
+    o1 = client.post("/api/food-orders", json={
+        "tenantId": "9111111111", "tenantName": "Foodie", "date": "2026-08-05",
+        "mealType": "Lunch", "quantity": 1, "pricePerMeal": 80}).json()
+    client.post("/api/food-orders", json={
+        "tenantId": "9111111111", "tenantName": "Foodie", "date": "2026-08-06",
+        "mealType": "Dinner", "quantity": 2, "pricePerMeal": 80})
+    cancelled = client.post("/api/food-orders", json={
+        "tenantId": "9111111111", "tenantName": "Foodie", "date": "2026-08-06",
+        "mealType": "Breakfast", "quantity": 1, "pricePerMeal": 50}).json()
+    client.put(f"/api/food-orders/{cancelled['id']}", json={
+        "tenantId": "9111111111", "tenantName": "Foodie", "date": "2026-08-06",
+        "mealType": "Breakfast", "quantity": 1, "pricePerMeal": 50, "status": "Cancelled"})
+    today = client.get("/api/food-orders/today", params={"date": "2026-08-06"}).json()
+    assert today["totalMeals"] == 2  # cancelled breakfast excluded
+    s = client.get("/api/food-orders/summary", params={"month": "2026-08"}).json()
+    assert s["foodRevenue"] == 240.0
+    per = [t for t in s["perTenant"] if t["tenantName"] == "Foodie"]
+    assert per and per[0]["total"] == 240.0
+    assert client.post("/api/food-orders", json={"tenantName": "", "mealType": "Lunch"}).status_code == 422
+
+
+def _make_billable_tenant():
+    csv_text = "Full Name,Mobile Number,Monthly Rent\nBilling Test,9111111111,8000\n"
+    client.post("/api/imports/commit", json={"filename": "t.csv", "csvText": csv_text, "mapping": {"0": "name", "1": "mobile", "2": "rent"}})
+    client.put("/api/tenants/9111111111", json={"roomNumber": "201", "status": "Active", "rent": 8000})
+
+
+def test_monthly_billing_food_and_duplicate_prevention():
+    _make_billable_tenant()
+    prev = client.get("/api/billing/preview", params={"month": "2026-08"}).json()
+    row = [r for r in prev["rows"] if r["tenantName"] == "Billing Test"][0]
+    assert row["rent"] == 8000
+    assert row["food"] == 240.0  # from food orders above (Foodie == same tenant key)
+    gen = client.post("/api/billing/generate", json={"month": "2026-08", "rows": [row]}).json()
+    assert len(gen["created"]) == 1
+    inv = gen["created"][0]
+    assert inv["food"] == 240.0 and inv["total"] == 8240.0
+    again = client.post("/api/billing/generate", json={"month": "2026-08", "rows": [row]}).json()
+    assert len(again["created"]) == 0 and "Billing Test" in again["skipped"]
+
+
+def test_overdue_tracking():
+    past = client.post("/api/invoices", json={
+        "tenantName": "Late Payer", "tenantMobile": "9222222222", "billingMonth": "2026-07",
+        "rent": 5000, "amountPaid": 0, "dueDate": "2026-08-01"}).json()
+    paid = client.post("/api/invoices", json={
+        "tenantName": "On Time", "tenantMobile": "9333333333", "billingMonth": "2026-07",
+        "rent": 5000, "amountPaid": 5000, "dueDate": "2026-08-01"}).json()
+    od = client.get("/api/invoices/overdue").json()
+    nums = [i["invoiceNumber"] for i in od["overdue"]]
+    assert past["invoiceNumber"] in nums
+    assert paid["invoiceNumber"] not in nums
+    entry = [i for i in od["overdue"] if i["invoiceNumber"] == past["invoiceNumber"]][0]
+    assert entry["daysOverdue"] >= 20 and entry["effectiveStatus"] == "Overdue"
+    assert od["summary"]["overdueAmount"] >= 5000
+
+
+FIXTURE_CSV = os.path.join(os.path.dirname(__file__), "..", "..", "tests", "fixtures", "google_form_sample.csv")
+
+
+def test_csv_preview_automapping_and_commit():
+    text = open(FIXTURE_CSV).read()
+    prev = client.post("/api/imports/preview", json={"filename": "Untitled form.csv", "csvText": text}).json()
+    mapping = prev["mapping"]
+    cols = prev["columns"]
+    def field_of(label):
+        return mapping.get(str(cols.index(label)))
+    assert field_of("Full Name") == "name"
+    assert field_of("Guest Mobile Number") == "mobile"
+    assert field_of("Email Address") == "email"
+    assert field_of("Monthly Rent") == "rent"
+    assert field_of("Security Deposit") == "deposit"
+    assert field_of("Room / Bed Number") == "roomNumber"
+    assert field_of("Identity Document Type") == "idType"
+    assert field_of("ID Document Number") == "idNumber"
+    assert field_of("Current Occupation") == "occupation"
+    assert field_of("Company / College / Organization Name") == "company"
+    assert prev["summary"]["total"] == 3
+    res = client.post("/api/imports/commit", json={
+        "filename": "Untitled form.csv", "csvText": text, "mapping": mapping, "decisions": {}}).json()
+    assert res["imported"] == 3 and res["invalid"] == 0
+    # tenants imported; first has rent/room from CSV → Active
+    t = client.get("/api/tenants/8975751671").json()
+    assert t["name"] == "kishor Binwade" and t["rent"] == 7000 and t["status"] == "Active"
+    # re-import same file → all skipped as duplicates, no data clobbered
+    res2 = client.post("/api/imports/commit", json={
+        "filename": "Untitled form.csv", "csvText": text, "mapping": mapping, "decisions": {}}).json()
+    assert res2["imported"] == 0 and res2["skipped"] == 3
+    assert client.get("/api/tenants/8975751671").json()["rent"] == 7000
+
+
+def test_csv_duplicate_update_existing():
+    csv_text = "Full Name,Mobile Number,Company Name\nKishor Binwade,8975751671,NewCorp\n"
+    prev = client.post("/api/imports/preview", json={"filename": "u.csv", "csvText": csv_text}).json()
+    dup = prev["rows"][0]
+    assert dup["status"] == "duplicate" and dup["changes"]["company"]["to"] == "NewCorp"
+    res = client.post("/api/imports/commit", json={
+        "filename": "u.csv", "csvText": csv_text,
+        "mapping": {"0": "name", "1": "mobile", "2": "company"},
+        "decisions": {"0": "update"}}).json()
+    assert res["duplicates"] == 1
+    assert client.get("/api/tenants/8975751671").json()["company"] == "NewCorp"
+
+
+def test_invalid_csv_and_import_history():
+    r = client.post("/api/imports/preview", json={"filename": "x.csv", "csvText": ""})
+    assert r.status_code == 400
+    hist = client.get("/api/imports").json()
+    assert len(hist) >= 2
+    assert hist[0]["filename"] in ("u.csv", "Untitled form.csv")
+    assert "totalRows" in hist[0] and isinstance(hist[0]["details"], list)
+
+
+def test_backup_includes_new_modules():
+    backup = client.get("/api/backup/export").json()
+    assert "expenses" in backup and "foodOrders" in backup and "imports" in backup
+    assert len(backup["foodOrders"]) >= 3
+    res = client.post("/api/backup/import?mode=merge", json=backup).json()
+    assert res["food_orders_added"] == 0  # merge skips existing ids

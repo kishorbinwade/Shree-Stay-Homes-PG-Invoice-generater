@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { NavLink, Outlet, Link } from 'react-router-dom';
 import {
   LayoutDashboard, FilePlus2, History, Users, Settings as SettingsIcon,
-  DatabaseBackup, Menu, WifiOff,
+  DatabaseBackup, Menu, WifiOff, BedDouble, CalendarPlus, IndianRupee,
+  AlarmClock, UtensilsCrossed, Wallet, BarChart3, FileUp,
 } from 'lucide-react';
 import { useSettings } from '../context/SettingsContext';
 import { Sheet, SheetContent, SheetTrigger } from './ui/sheet';
@@ -11,10 +12,18 @@ import { Button } from './ui/button';
 const NAV = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, testId: 'nav-dashboard' },
   { to: '/invoices/new', label: 'Create Invoice', icon: FilePlus2, testId: 'nav-create-invoice' },
-  { to: '/history', label: 'Invoice History', icon: History, testId: 'nav-history' },
   { to: '/tenants', label: 'Tenants', icon: Users, testId: 'nav-tenants' },
-  { to: '/settings', label: 'Settings', icon: SettingsIcon, testId: 'nav-settings' },
+  { to: '/rooms', label: 'Rooms & Beds', icon: BedDouble, testId: 'nav-rooms' },
+  { to: '/billing', label: 'Monthly Billing', icon: CalendarPlus, testId: 'nav-billing' },
+  { to: '/history', label: 'Invoices', icon: History, testId: 'nav-history' },
+  { to: '/payments', label: 'Payments', icon: IndianRupee, testId: 'nav-payments' },
+  { to: '/overdue', label: 'Overdue', icon: AlarmClock, testId: 'nav-overdue' },
+  { to: '/food', label: 'Food Orders', icon: UtensilsCrossed, testId: 'nav-food' },
+  { to: '/expenses', label: 'Expenses', icon: Wallet, testId: 'nav-expenses' },
+  { to: '/reports', label: 'Reports', icon: BarChart3, testId: 'nav-reports' },
+  { to: '/import', label: 'Import Google Forms', icon: FileUp, testId: 'nav-import' },
   { to: '/backup', label: 'Backup & Restore', icon: DatabaseBackup, testId: 'nav-backup' },
+  { to: '/settings', label: 'Settings', icon: SettingsIcon, testId: 'nav-settings' },
 ];
 
 function Brand({ settings }) {

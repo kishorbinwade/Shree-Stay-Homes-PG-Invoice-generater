@@ -78,6 +78,58 @@ export const migrateLocalData = (payload) => req('/migrate', { method: 'POST', b
 export const clearAllData = () => req('/data', { method: 'DELETE' });
 export const csvDownloadUrl = () => `${API}/backup/export.csv`;
 
+// ---------- tenants (extended) ----------
+export const updateTenant = (id, data) =>
+  req(`/tenants/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(data) });
+
+// ---------- expenses ----------
+export const fetchExpenses = ({ month, dateFrom, dateTo } = {}) => {
+  const p = new URLSearchParams();
+  if (month) p.set('month', month);
+  if (dateFrom) p.set('dateFrom', dateFrom);
+  if (dateTo) p.set('dateTo', dateTo);
+  const s = p.toString();
+  return req(`/expenses${s ? `?${s}` : ''}`);
+};
+export const createExpense = (d) => req('/expenses', { method: 'POST', body: JSON.stringify(d) });
+export const removeExpense = (id) => req(`/expenses/${id}`, { method: 'DELETE' });
+
+// ---------- food orders ----------
+export const fetchFoodOrders = ({ date, month } = {}) => {
+  const p = new URLSearchParams();
+  if (date) p.set('date', date);
+  if (month) p.set('month', month);
+  const s = p.toString();
+  return req(`/food-orders${s ? `?${s}` : ''}`);
+};
+export const createFoodOrder = (d) => req('/food-orders', { method: 'POST', body: JSON.stringify(d) });
+export const updateFoodOrder = (id, d) => req(`/food-orders/${id}`, { method: 'PUT', body: JSON.stringify(d) });
+export const removeFoodOrder = (id) => req(`/food-orders/${id}`, { method: 'DELETE' });
+export const fetchFoodToday = (date) => req(`/food-orders/today?date=${date}`);
+export const fetchFoodSummary = (month) => req(`/food-orders/summary?month=${month}`);
+
+// ---------- monthly billing / overdue / reports / dashboard ----------
+export const fetchBillingPreview = (month) => req(`/billing/preview?month=${month}`);
+export const generateMonthlyBilling = (payload) =>
+  req('/billing/generate', { method: 'POST', body: JSON.stringify(payload) });
+export const fetchOverdue = () => req('/invoices/overdue');
+export const fetchMonthlyReport = ({ month, dateFrom, dateTo } = {}) => {
+  const p = new URLSearchParams();
+  if (month) p.set('month', month);
+  if (dateFrom) p.set('dateFrom', dateFrom);
+  if (dateTo) p.set('dateTo', dateTo);
+  const s = p.toString();
+  return req(`/reports/monthly${s ? `?${s}` : ''}`);
+};
+export const fetchDashboardStats = () => req('/dashboard/stats');
+
+// ---------- Google Forms CSV import ----------
+export const previewImport = (filename, csvText) =>
+  req('/imports/preview', { method: 'POST', body: JSON.stringify({ filename, csvText }) });
+export const commitImport = (payload) =>
+  req('/imports/commit', { method: 'POST', body: JSON.stringify(payload) });
+export const fetchImports = () => req('/imports');
+
 export function downloadViaUrl(url) {
   const a = document.createElement('a');
   a.href = url;

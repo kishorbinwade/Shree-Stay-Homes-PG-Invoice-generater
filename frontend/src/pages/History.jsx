@@ -3,10 +3,10 @@ import { useNavigate, Link } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
   Search, Eye, Download, Printer, Mail, Copy, Pencil, Trash2, ArrowUpDown,
-  FileText, Loader2, FilePlus2,
+  FileText, Loader2, FilePlus2, MessageCircle,
 } from 'lucide-react';
 import { fetchInvoices, removeInvoice, updateInvoice } from '../lib/api';
-import { inr, fmtDate, monthLabel } from '../lib/format';
+import { inr, fmtDate, monthLabel, waReminderLink } from '../lib/format';
 import { buildInvoicePDF, downloadPDF, printPDF } from '../lib/pdf';
 import { deliverInvoiceEmail } from '../lib/api';
 import { useSettings } from '../context/SettingsContext';
@@ -171,6 +171,13 @@ export default function History() {
                         <Button variant="ghost" size="icon" title="Resend Email" disabled={busyId === inv.id} onClick={() => handleResend(inv)} data-testid={`resend-invoice-${inv.invoiceNumber}`}>
                           {busyId === inv.id ? <Loader2 className="h-4 w-4 animate-spin text-stone-500" /> : <Mail className="h-4 w-4 text-stone-500" />}
                         </Button>
+                        {Number(inv.balanceDue) > 0 && inv.tenantMobile && (
+                          <Button variant="ghost" size="icon" title="WhatsApp Payment Reminder" asChild data-testid={`whatsapp-${inv.invoiceNumber}`}>
+                            <a href={waReminderLink(inv, settings.businessName)} target="_blank" rel="noopener noreferrer">
+                              <MessageCircle className="h-4 w-4 text-green-600" />
+                            </a>
+                          </Button>
+                        )}
                         <Button variant="ghost" size="icon" title="Duplicate" onClick={() => navigate(`/invoices/new?from=${inv.id}`)} data-testid={`duplicate-invoice-${inv.invoiceNumber}`}><Copy className="h-4 w-4 text-stone-500" /></Button>
                         <Button variant="ghost" size="icon" title="Edit" onClick={() => navigate(`/invoices/${inv.id}/edit`)} data-testid={`edit-invoice-${inv.invoiceNumber}`}><Pencil className="h-4 w-4 text-stone-500" /></Button>
                         <Button variant="ghost" size="icon" title="Delete" onClick={() => setPendingDelete(inv)} data-testid={`delete-invoice-${inv.invoiceNumber}`}><Trash2 className="h-4 w-4 text-red-500" /></Button>
