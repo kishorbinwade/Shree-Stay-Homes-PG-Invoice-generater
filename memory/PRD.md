@@ -53,6 +53,11 @@ Production-ready PG Billing & Invoice Generator for "SHREE STAY HOMES & PG" (PG 
 ## Implemented (2026-08-21, IndexedDB → SQLite migration)
 - Primary storage is now SQLite (`backend/data/pg_billing.db`, WAL) via `backend/database.py`; FastAPI REST API for invoices/tenants/settings/backup/migrate; invoice numbers allocated atomically server-side (BEGIN IMMEDIATE). Frontend `lib/api.js` replaces IndexedDB; legacy IndexedDB is auto-deleted on first load (owner-approved, no migration prompt). run-local.sh binds 127.0.0.1; .gitignore covers backend/data/ and *.db. Backend pytest: 16 hermetic tests pass. Committed as c3fee10→(sqlite commit).
 
+## Implemented (2026-08-21, feature modules)
+- Monthly Billing (bulk preview/generate, food-order totals, carried previous balance, tenant+month duplicate prevention), Overdue tracking (buckets + days overdue), WhatsApp wa.me reminders (no API), Expenses + monthly/date-range reports (net profit, food profit), on-demand Food Orders (today dashboard, monthly aggregation → billing), Google Forms CSV import (auto-map incl. owner's real form columns, preview, duplicate Skip/Update with field diff, import history), Rooms & Beds assignment (Pending Admission default), Payments ledger, extended dashboard stats. Backup JSON now includes expenses/foodOrders/imports. 24 backend tests pass; committed 7c02043.
+
+- Testing agent iteration_6: 100% pass on all new modules (billing bulk-generate + duplicate prevention, food cancel exclusion, CSV import/duplicate/update flows, reports math, WhatsApp link format, backup keys, dashboard cards, 0 pageerrors on 14 routes). Push to GitHub pending user action (Emergent Save → Save to GitHub).
+
 ## Backlog / Next Tasks
 - P0: none blocking.
 - P1: Verify PDF visual layout edge cases (very long tenant names/addresses) with document render check; silence recharts ResponsiveContainer width(-1) warning on first mount.

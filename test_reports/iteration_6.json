@@ -1,0 +1,40 @@
+{
+  "summary": "Iteration 6 validates all new feature modules on preview SQLite. Backend pytest tests/backend_test.py: 24/24 passed (-n 0, 0.67s). API smoke on preview URL: /api/dashboard/stats returns extended keys (occupiedRooms, foodOrdersToday, foodRevenueMonth, expensesMonth, netProfitMonth); /api/invoices/overdue returns {overdue,dueToday,upcoming,summary}; /api/reports/monthly returns billed/revenue/expenses/netProfit/foodRevenue/foodProfit; /api/food-orders, /api/expenses, /api/imports empty->200. Backup export keys = [app,version,exportedAt,invoices,tenants,expenses,foodOrders,imports,settings,sequences] and contains expenses=1, foodOrders=1, imports=1 after seeding. All 14 routes load with 0 pageerrors. Frontend E2E: /rooms assign R-101/B1 rent 6000 status Active for T1_UI_Test succeeds (toast + row updates, status=Active). /billing Sept 2026 preview showed 5 rows; Generate created SHPG-2026-0005..0009 (all with prev balance from Aug); re-Preview correctly shows '0 to generate · 5 already billed' (duplicate prevention works). /food added Lunch qty 2 @₹80 for Smoke Test -> total 2/₹160; changing status to Cancelled -> total 0/₹0 (cancelled excluded). /expenses added TEST_Groceries ₹1234 -> Total ₹1,234.00; CSV button present. /reports shows billed ₹26,800 (Aug), revenue ₹5,000, expenses ₹1,234, netProfit ₹3,766, food revenue/profit ₹0. /overdue summary cards render (0/0/0 currently — all invoices created today so no overdue yet). /history has 8 whatsapp-<number> links; first href is wa.me/919876543210 with URL-encoded message containing 'Invoice: SHPG-2026-0009', 'Pending: ₹4,600.00'. /import upload google_form_sample.csv -> summary '3 records found · 3 new · 0 duplicate · 0 invalid', 46 auto-mapping dropdowns, 3 preview rows; Import Valid Records -> toast 'Imported 3 tenant(s)' + import-history row shows 3/3/0/0/0. Re-upload -> '3 duplicates', Skip/Update radios (3 each), field-diff hint ('No field changes — incoming data matches') displays. Dashboard shows 4 legacy stat cards + 4 new (stat-occupancy, stat-overdue, stat-food-today, stat-net-profit) + Billed vs Collected chart + Recent Invoices list. Security: /api/settings body has NO password/secret keys; backup only contains SMTP_APP_PASSWORD as substring inside invoice.emailError text ('Set SMTP_USER and SMTP_APP_PASSWORD in backend/.env...'), NOT as an actual secret value — acceptable. Regression: existing 4 invoices retained; email 503 Failed w/ Retry still by design.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "verifications": {
+    "pytest": "24 passed, 0 failed (-n 0, 0.67s)",
+    "routes_pageerrors": "0 on all 14 routes",
+    "monthly_billing_generate": "created SHPG-2026-0005..0009 for September 2026",
+    "monthly_billing_duplicate_prevention": "re-preview shows '5 already billed · 0 to generate'",
+    "food_status_cancelled_excludes_totals": true,
+    "food_meal_cards_update": true,
+    "expenses_add_and_total": "₹1,234.00",
+    "reports_net_profit_calc": "5000 - 1234 = 3766 correct",
+    "history_whatsapp_link_format": "wa.me/91<mobile>?text=... contains Invoice: SHPG-2026-0009 and Pending: ₹4,600.00",
+    "csv_import_new": "3 new, 46 auto-mapped columns, committed OK",
+    "csv_import_duplicate_flow": "3 duplicates, Skip+Update radios, field-diff hint shown",
+    "backup_keys_include_new": "expenses/foodOrders/imports present",
+    "dashboard_new_stats_present": ["stat-occupancy","stat-overdue","stat-food-today","stat-net-profit"],
+    "smtp_password_not_leaked_as_value": true,
+    "smtp_password_substring_in_error_message_only": true
+  },
+  "test_report_links": ["/app/backend/tests/backend_test.py", "/app/test_reports/pytest/iteration_6.xml"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Monthly billing preview correctly folds in previous month's pending balance into prev-balance column, then Generate atomically allocates sequential invoice numbers (SHPG-2026-0005..0009 assigned back-to-back).",
+    "billing_generate correctly skips already-billed (tenant,month) pairs — duplicate re-run created 0 additional invoices.",
+    "Overdue endpoint declared before /api/invoices/{inv_id} route (correct FastAPI ordering) — smoke curl confirms /api/invoices/overdue returns structured JSON not 404.",
+    "waReminderLink builds wa.me URL with only encoded text (no phone-number leak in text body), uses mobile only in the wa.me/91<num> path — correct.",
+    "CSV_AUTO_MAP correctly maps all real Google Forms columns (Full Name, Guest Mobile Number, Monthly Rent, Security Deposit, Room / Bed Number) — 3/3 preview rows populated correctly.",
+    "Food orders with status=Cancelled correctly excluded from day totals AND monthly food aggregation feeding billing — verified via UI total flip 2→0.",
+    "Backup export.settings does NOT include SMTP_USER/SMTP_APP_PASSWORD as values (only businessName/ownerEmail/etc.). The substring 'SMTP_APP_PASSWORD' appears only inside invoice.emailError user-facing hint — acceptable and helpful for the operator."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "None required. SMTP unconfigured; email Failed by design.",
+  "seed_data_creation": "Preview SQLite now contains: 9 invoices (SHPG-2026-0001..0009) with 0005-0009 being September 2026 batch from Monthly Billing; 5 active tenants + 3 imported from google_form_sample.csv (kishor Binwade, Fffgg, Gokul Prabhu); 1 expense (TEST_Groceries ₹1234); 1 food order (Cancelled Lunch for Smoke Test); 1 import history entry; T1_UI_Test assigned Room R-101/B1 rent ₹6000.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "All new modules (Monthly Billing, Overdue, Food Orders, Expenses, Reports, Import Google Forms, Rooms & Beds, Payments, Dashboard v2, WhatsApp reminders, extended Backup) are fully working end-to-end. 9 invoices, 8 tenants, 1 expense, 1 food order, 1 import in preview DB. Overdue lists are empty because all invoices were created 21 Aug 2026 with future due dates — to test overdue populated states, manually set an invoice dueDate in the past or wait past net-7-days. SMTP intentionally unconfigured (503 Failed retry by design)."
+}
