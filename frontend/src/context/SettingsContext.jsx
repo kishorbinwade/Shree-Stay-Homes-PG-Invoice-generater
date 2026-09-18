@@ -9,10 +9,26 @@ export function SettingsProvider({ children }) {
   const [backendDown, setBackendDown] = useState(false);
 
   useEffect(() => {
-    fetchSettings()
-      .then((s) => { setSettings(s); setBackendDown(false); })
-      .catch(() => setBackendDown(true))
-      .finally(() => setLoaded(true));
+    let cancelled = false;
+    const load = async (attempt = 1) => {
+      try {
+        const s = await fetchSettings();
+        if (cancelled) return;
+        setSettings(s);
+        setBackendDown(false);
+        setLoaded(true);
+      } catch (e) {
+        if (cancelled) return;
+        if (attempt < 3) {
+          setTimeout(() => load(attempt + 1), 1500);
+        } else {
+          setBackendDown(true);
+          setLoaded(true);
+        }
+      }
+    };
+    load();
+    return () => { cancelled = true; };
   }, []);
 
   const updateSettings = useCallback(async (next) => {

@@ -6,6 +6,7 @@ import {
   AlarmClock, UtensilsCrossed, Wallet, BarChart3, FileUp,
 } from 'lucide-react';
 import { useSettings } from '../context/SettingsContext';
+import { IS_LOCAL } from '../lib/api';
 import { Sheet, SheetContent, SheetTrigger } from './ui/sheet';
 import { Button } from './ui/button';
 
@@ -119,7 +120,9 @@ export default function Layout() {
 
       {backendDown && (
         <div data-testid="backend-offline-banner" className="border-b border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700 lg:pl-64">
-          Cannot reach the local backend (http://localhost:8001). Start it with ./scripts/run-local.sh — invoices, history and settings need it running.
+          {IS_LOCAL
+            ? 'Cannot reach the backend at http://localhost:8001. Start it with ./scripts/run-local.sh — invoices, history and settings need it running.'
+            : 'Cannot reach the backend right now. Retrying automatically…'}
         </div>
       )}
       <main className="lg:pl-64">

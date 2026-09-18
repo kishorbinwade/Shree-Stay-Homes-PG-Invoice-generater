@@ -73,3 +73,9 @@ Production-ready PG Billing & Invoice Generator for "SHREE STAY HOMES & PG" (PG 
 - Frontend: `/tenants/:id/ledger` page (`pages/TenantLedger.jsx`): summary cards, running-balance table, footer totals, invoice links to edit, New Invoice prefilled. Tenants page: name link + BookOpen ledger button.
 - Create Invoice: `components/TenantNameInput.jsx` combobox on Tenant Name (create mode only) — filters existing tenants by name/mobile, keyboard nav, selecting autofills mobile/email/room/bed/occupation/emergency/check-in/out.
 - Remaining backlog (P2): per-year invoice sequence reset UI, GST % field, WhatsApp PDF share, dark print stylesheet, ledger PDF export / month filter.
+
+## 2026-06 (fork) — Dual-environment robustness + bundled sample data (DONE, verified)
+- Concern: user runs the app locally (localhost) and pushes/pulls code; wanted the same code to work in the Emergent preview AND on their PC without config edits or build/architecture errors, and to keep sample data in both.
+- Backend URL now auto-resolves in `frontend/src/lib/api.js` via `resolveBackend()`: hostname localhost/127.0.0.1 → `http://localhost:8001`; anything else → `REACT_APP_BACKEND_URL`. Exported `IS_LOCAL`. Same code works in both places regardless of which `.env` is present. Error message + Layout banner made dynamic (no more misleading hardcoded localhost text on the preview).
+- SettingsContext now retries fetchSettings up to 3× (1.5s apart) before flagging backendDown → no false-alarm banner on slow first load.
+- Bundled sample data: `backend/seed_data.json` (5 invoices, 2 tenants, 4 expenses, 4 food orders — expenses/food dated current month). `database.seed_if_empty()` imports it only when the DB has zero invoices AND zero tenants (idempotent, never overwrites real data). Called on server startup in `server.py`. Ensures a freshly-pulled local copy (DB is gitignored) is never blank. Verified on fresh temp DB + live preview (Dashboard, Expenses render).

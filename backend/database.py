@@ -1288,3 +1288,27 @@ def list_imports():
         out.append(d)
     return out
 
+
+SEED_PATH = Path(__file__).parent / "seed_data.json"
+
+
+def seed_if_empty() -> dict:
+    """Populate the DB with bundled sample data if it is completely empty.
+
+    Runs on startup so both the hosted preview and a freshly-pulled local copy
+    show the same demo invoices/tenants/expenses/food orders. No-op once data
+    exists, so it never overwrites real records.
+    """
+    get_conn()
+    c = counts()
+    if c.get("invoices") or c.get("tenants"):
+        return {"seeded": False, "reason": "data already present"}
+    if not SEED_PATH.exists():
+        return {"seeded": False, "reason": "seed_data.json missing"}
+    try:
+        with open(SEED_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        result = import_data(data, mode="merge")
+        return {"seeded": True, **result}
+    except Exception as exc:  # pragma: no cover
+        return {"seeded": False, "reason": str(exc)}

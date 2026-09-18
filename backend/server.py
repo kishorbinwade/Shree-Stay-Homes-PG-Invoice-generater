@@ -27,6 +27,13 @@ load_dotenv(ROOT_DIR / '.env')
 
 import database as db
 
+# Load bundled sample data on first run (empty DB) so the app is never blank
+# in the preview or on a freshly-pulled local copy.
+try:
+    db.seed_if_empty()
+except Exception:  # pragma: no cover — seeding must never block startup
+    pass
+
 app = FastAPI()
 api_router = APIRouter(prefix="/api")
 

@@ -1,9 +1,21 @@
 import { buildInvoicePDF, pdfToBase64, pdfFilename } from './pdf';
 
-// Backend URL: set REACT_APP_BACKEND_URL in frontend/.env.
-// Falls back to http://localhost:8001 for local/offline runs.
-const BACKEND = process.env.REACT_APP_BACKEND_URL || 'http://localhost:8001';
+// Backend URL resolution — works in BOTH the hosted preview and on a local PC
+// with the same code, so pushing/pulling never needs a config change:
+//  • Running on localhost (your computer)  -> always http://localhost:8001
+//  • Running anywhere else (preview/hosted) -> REACT_APP_BACKEND_URL
+function resolveBackend() {
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname;
+    if (host === 'localhost' || host === '127.0.0.1') {
+      return 'http://localhost:8001';
+    }
+  }
+  return process.env.REACT_APP_BACKEND_URL || 'http://localhost:8001';
+}
+const BACKEND = resolveBackend();
 const API = `${BACKEND}/api`;
+export const IS_LOCAL = BACKEND === 'http://localhost:8001';
 
 export const DEFAULT_SETTINGS = {
   businessName: 'SHREE STAY HOMES & PG',
@@ -32,7 +44,10 @@ async function req(path, options = {}) {
       ...options,
     });
   } catch (e) {
-    throw new Error('Cannot reach the local backend (http://localhost:8001). Start it with ./scripts/run-local.sh');
+    const msg = IS_LOCAL
+      ? 'Cannot reach the backend at http://localhost:8001. Start it with ./scripts/run-local.sh — invoices, history and settings need it running.'
+      : `Cannot reach the backend at ${BACKEND}. Please retry in a moment.`;
+    throw new Error(msg);
   }
   if (!res.ok) {
     let detail = `Request failed (${res.status})`;
