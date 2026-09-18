@@ -62,3 +62,8 @@ Production-ready PG Billing & Invoice Generator for "SHREE STAY HOMES & PG" (PG 
 - P0: none blocking.
 - P1: Verify PDF visual layout edge cases (very long tenant names/addresses) with document render check; silence recharts ResponsiveContainer width(-1) warning on first mount.
 - P2: Per-year invoice sequence reset UI; GST % field if owner registers GSTIN; tenant ledger view; WhatsApp share of PDF; dark print stylesheet for HTML preview.
+
+## 2026-06 (fork) — Preview backend connectivity fix
+- Root cause of "Cannot reach the local backend (http://localhost:8001)" banner in the preview: `frontend/.env` and `backend/.env` were absent in the pod (gitignored), so the browser fell back to `localhost:8001` (unreachable from the preview URL) and CORS only allowed `http://localhost:3000`.
+- Fix: created `frontend/.env` (REACT_APP_BACKEND_URL = preview URL) and `backend/.env` from the examples with the preview origin added to CORS_ORIGINS. No source code changed. Verified: banner gone on Dashboard/History, GET+PUT via preview return 200.
+- Note: .env files are gitignored; on a fresh pod they must be recreated from `.env.example`. Local runs still use `http://localhost:8001` fallback.
