@@ -1,0 +1,40 @@
+{
+  "summary": "Iteration 7 validates two new features: Tenant Ledger (backend + UI) and Tenant Autocomplete on Create Invoice. Backend pytest: 26/26 passed in 1.87s (includes test_tenant_ledger_running_balance + test_tenant_ledger_opening_balance_and_404). Live API smoke on preview URL: GET /api/tenants/9876501234/ledger returns 200 with exact expected summary {totalBilled:25250, totalPaid:16750, outstanding:8500, invoiceCount:3} and 5 rows sorted by date with alternating invoice/payment types and correct running balance (8400 -> 3400 -> 11750 -> 0 -> 8500). Charge column excludes previousBalance (invoice2 shows debit=8350 = 11750-3400). GET /api/tenants/0000000000/ledger => 404. Created throwaway tenant mobile 5551112222 with first invoice having previousBalance=500: ledger correctly prepends an 'opening' row (debit=500, description 'Opening balance (carried forward)') before the invoice row. After DELETE /api/tenants/5551112222, ledger still returns with tenant.deleted=true, name/mobile retained, and 2 rows intact (invoices preserved). Frontend E2E on preview URL: /tenants shows tenant-name-link-9876501234 and tenant-ledger-9876501234 (BookOpen button) — clicking navigates to /tenants/9876501234/ledger. Ledger page renders ledger-tenant-name='Rahul Sharma', ledger-total-billed=₹25,250.00, ledger-total-paid=₹16,750.00, ledger-outstanding=₹8,500.00, ledger-table with 5 rows, ledger-footer totals, ledger-back-link, ledger-new-invoice-btn. Clicking New Invoice navigates to /invoices/new?tenant=9876501234 and prefills tenant-name=Rahul Sharma, tenant-mobile=9876501234, tenant-email=rahul@example.com, room-number=101, bed-number=A. /tenants/0000000000/ledger renders ledger-error 'Tenant not found' with Back to tenants link. Create Invoice tenant autocomplete: focusing tenant-name opens tenant-suggestions dropdown showing 2 existing tenants; typing 'rah' filters to Rahul Sharma only; typing '9822' filters to Priya Patel only (mobile-digit filter works); typing 'rah' + ArrowDown + Enter fills all fields (name, mobile, email, room, bed) from Rahul; Escape hides list; clicking outside hides list; typing 'BrandNewNameXYZ' shows no dropdown (0 matches). Edit Invoice (/invoices/{id}/edit) does NOT show the suggestions dropdown when focusing tenant-name (plain input mode) — verified count=0. No page errors. All requested tests pass end-to-end.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "verifications": {
+    "pytest": "26 passed, 0 failed",
+    "ledger_summary_rahul": {"totalBilled": 25250, "totalPaid": 16750, "outstanding": 8500, "invoiceCount": 3},
+    "ledger_running_balance_progression": [8400, 3400, 11750, 0, 8500],
+    "ledger_charge_excludes_previous_balance": true,
+    "ledger_404_for_unknown_id": true,
+    "ledger_opening_row_when_first_invoice_has_prev_balance": true,
+    "ledger_deleted_tenant_preserves_invoices": true,
+    "tenants_page_ledger_button_and_link": true,
+    "ledger_page_all_testids_visible": ["ledger-tenant-name","ledger-total-billed","ledger-total-paid","ledger-outstanding","ledger-table","ledger-footer","ledger-back-link","ledger-new-invoice-btn"],
+    "new_invoice_query_param_prefill": true,
+    "autocomplete_filter_by_name": "'rah' -> Rahul Sharma only",
+    "autocomplete_filter_by_mobile_digits": "'9822' -> Priya Patel only",
+    "autocomplete_keyboard_select": true,
+    "autocomplete_escape_and_outside_close": true,
+    "autocomplete_no_match_no_dropdown": true,
+    "edit_invoice_no_dropdown": true
+  },
+  "test_report_links": ["/app/backend/tests/backend_test.py", "/app/test_reports/pytest/iteration_7.xml"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "tenant_ledger correctly derives charge as (invoiceTotal - previousBalance) so totalBilled never double-counts carried balances — verified numerically on 3-invoice seed.",
+    "Opening row is only inserted when the tenant's FIRST invoice has previousBalance>0, matching the chosen product spec.",
+    "Deleted tenants gracefully return tenant.deleted=true rather than 404 as long as invoices exist — good UX for historical review.",
+    "TenantNameInput: filter matches on lowercased name substring OR raw mobile substring — efficient and covers both search modes; capped at 8 results which is a sensible limit.",
+    "Autocomplete is scoped to CREATE mode only in CreateInvoice.jsx (editing uses plain Input) — prevents accidental identity swap on existing invoices.",
+    "onMouseDown uses e.preventDefault() to avoid input blur race — correct pattern for click-to-select in a listbox."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "None required",
+  "seed_data_creation": "Created + soft-deleted throwaway tenant mobile=5551112222 (TEST_OpeningTenant) with 1 invoice SHPG-2026-0005 previousBalance=500 to validate opening-row and deleted-tenant ledger paths. Seed tenants Rahul Sharma (9876501234) and Priya Patel (9822011223) untouched.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Tenant Ledger and Tenant autocomplete are fully working. Preview SQLite now has an extra invoice SHPG-2026-0005 attached to soft-deleted tenant 5551112222 — this may affect downstream tenant/invoice counts but is expected. Regression checks (dashboard/history/payments/tenants load, invoice creation) were previously validated in iteration_6 and remain intact under this iteration."
+}

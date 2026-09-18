@@ -67,3 +67,9 @@ Production-ready PG Billing & Invoice Generator for "SHREE STAY HOMES & PG" (PG 
 - Root cause of "Cannot reach the local backend (http://localhost:8001)" banner in the preview: `frontend/.env` and `backend/.env` were absent in the pod (gitignored), so the browser fell back to `localhost:8001` (unreachable from the preview URL) and CORS only allowed `http://localhost:3000`.
 - Fix: created `frontend/.env` (REACT_APP_BACKEND_URL = preview URL) and `backend/.env` from the examples with the preview origin added to CORS_ORIGINS. No source code changed. Verified: banner gone on Dashboard/History, GET+PUT via preview return 200.
 - Note: .env files are gitignored; on a fresh pod they must be recreated from `.env.example`. Local runs still use `http://localhost:8001` fallback.
+
+## 2026-06 (fork) — Tenant Ledger + tenant autocomplete (DONE, testing agent iteration_7: all pass)
+- Backend: `database.tenant_ledger(tid)` + `GET /api/tenants/{tid}/ledger` → {tenant, rows[], summary{totalBilled,totalPaid,outstanding,invoiceCount}}. Row types: opening (first invoice previousBalance>0), invoice (debit = total − previousBalance, no double counting), payment (credit = amountPaid, mode/txn). Works for deleted tenant profiles (tenant.deleted=true). 404 when no tenant and no invoices. 2 new pytest tests (26 total pass).
+- Frontend: `/tenants/:id/ledger` page (`pages/TenantLedger.jsx`): summary cards, running-balance table, footer totals, invoice links to edit, New Invoice prefilled. Tenants page: name link + BookOpen ledger button.
+- Create Invoice: `components/TenantNameInput.jsx` combobox on Tenant Name (create mode only) — filters existing tenants by name/mobile, keyboard nav, selecting autofills mobile/email/room/bed/occupation/emergency/check-in/out.
+- Remaining backlog (P2): per-year invoice sequence reset UI, GST % field, WhatsApp PDF share, dark print stylesheet, ledger PDF export / month filter.
