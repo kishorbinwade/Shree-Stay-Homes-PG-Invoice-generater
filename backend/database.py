@@ -11,6 +11,7 @@ import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+import payment_store
 
 DB_PATH = os.environ.get("DB_PATH", str(Path(__file__).parent / "data" / "pg_billing.db"))
 
@@ -169,8 +170,10 @@ def get_conn() -> sqlite3.Connection:
         Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
         _conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         _conn.row_factory = sqlite3.Row
+        _conn.execute("PRAGMA foreign_keys=ON")
         _conn.execute("PRAGMA journal_mode=WAL")
         _conn.executescript(SCHEMA)
+        payment_store.initialise(_conn)
     return _conn
 
 
@@ -202,6 +205,12 @@ def _row_to_invoice(row: sqlite3.Row) -> dict:
             except Exception:
                 v = {}
         inv[camel] = v
+    inv["payments"] = payment_store.list_payments(get_conn(), inv["id"])
+    paid = sum(payment_store.cents(p["amount"]) for p in inv["payments"]) / 100
+    inv.update(payment_store.summary(inv["total"], paid))
+    inv["amountPaid"] = inv["total_paid"]
+    inv["balanceDue"] = inv["balance_due"]
+    inv["paymentStatus"] = {"UNPAID": "Pending", "PAID": "Paid", "PARTIALLY PAID": "Partially Paid"}[inv["payment_status"]]
     return inv
 
 
@@ -279,6 +288,21 @@ def get_invoice(inv_id: str):
     return _row_to_invoice(row) if row else None
 
 
+def get_invoice_by_number(number: str):
+    with _lock:
+        row = get_conn().execute("SELECT * FROM invoices WHERE invoice_number=?", (number,)).fetchone()
+    return _row_to_invoice(row) if row else None
+
+
+def save_invoice_email_status(inv_id: str, status: dict):
+    """Delivery updates must not rewrite amounts or upsert an old tenant snapshot."""
+    with _lock:
+        conn = get_conn()
+        with conn:
+            conn.execute("UPDATE invoices SET email_status=?, updated_at=? WHERE id=?",
+                         (json.dumps(status), _now_iso(), inv_id))
+
+
 def delete_invoice(inv_id: str) -> bool:
     with _lock:
         conn = get_conn()
@@ -320,9 +344,16 @@ def create_invoice(data: dict) -> dict:
             inv["id"] = uuid.uuid4().hex
             inv["invoiceNumber"] = number
             conn.execute(_insert_sql(), tuple(_params(inv).values()))
+            if inv["amountPaid"] > 0:
+                payment_store.insert(conn, inv["id"], {
+                    "amount": inv["amountPaid"], "paymentDate": data.get("paymentDate") or inv["invoiceDate"],
+                    "paymentMethod": inv.get("paymentMode") or "Cash", "reference": inv.get("transactionId") or "",
+                    "notes": "Initial payment recorded with invoice"}, allow_advance=bool(data.get("allowAdvance")))
+            else:
+                payment_store.sync_invoice(conn, inv["id"])
             _upsert_tenant(conn, inv)
             conn.commit()
-            return inv
+            return get_invoice(inv["id"])
         except Exception:
             conn.rollback()
             raise
@@ -331,20 +362,42 @@ def create_invoice(data: dict) -> dict:
 def update_invoice(inv_id: str, data: dict):
     with _lock:
         conn = get_conn()
-        row = conn.execute("SELECT * FROM invoices WHERE id=?", (inv_id,)).fetchone()
-        if not row:
-            return None
-        ex = _row_to_invoice(row)
-        merged = {**ex, **{k: v for k, v in data.items() if k in FIELD_MAP}}
-        merged["id"] = inv_id
-        merged["invoiceNumber"] = ex["invoiceNumber"]
-        inv = _normalize_invoice(merged, keep_created=ex["createdAt"])
-        sets = ", ".join(f"{snake}=?" for camel, snake in FIELD_MAP.items() if camel != "id")
-        vals = [_params(inv)[snake] for camel, snake in FIELD_MAP.items() if camel != "id"]
-        with conn:
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute("SELECT * FROM invoices WHERE id=?", (inv_id,)).fetchone()
+            if not row:
+                conn.rollback()
+                return None
+            ex = _row_to_invoice(row)
+            charges = ("rent", "securityDeposit", "electricity", "food", "maintenance", "otherCharges", "discount", "previousBalance")
+            if any(k in data and payment_store.cents(data[k]) != payment_store.cents(ex[k]) for k in charges):
+                raise ValueError("Original invoice charges cannot be changed. Record payments separately.")
+            # Compatibility: an older client increasing Amount Paid appends a payment,
+            # never overwrites the ledger. Corrections use the individual payment API.
+            target = payment_store.cents(data.get("amountPaid", ex["amountPaid"]))
+            delta = target - payment_store.cents(ex["amountPaid"])
+            if delta < 0:
+                raise ValueError("Edit or delete the individual payment to reduce Total Paid.")
+            if delta > 0:
+                payment_store.insert(conn, inv_id, {"amount": delta / 100,
+                    "paymentDate": data.get("paymentDate") or _now_iso()[:10],
+                    "paymentMethod": data.get("paymentMode") or "Cash",
+                    "reference": data.get("transactionId") or "", "notes": "Payment recorded from invoice update"})
+            merged = {**ex, **{k: v for k, v in data.items() if k in FIELD_MAP}}
+            merged.update(id=inv_id, invoiceNumber=ex["invoiceNumber"], tenantEmail=ex["tenantEmail"])
+            inv = _normalize_invoice(merged, keep_created=ex["createdAt"])
+            # Never recalculate or renumber the original bill when its payments change.
+            inv.update(total=ex["total"], subtotal=ex["subtotal"])
+            sets = ", ".join(f"{snake}=?" for camel, snake in FIELD_MAP.items() if camel != "id")
+            vals = [_params(inv)[snake] for camel, snake in FIELD_MAP.items() if camel != "id"]
             conn.execute(f"UPDATE invoices SET {sets} WHERE id=?", (*vals, inv_id))
-            _upsert_tenant(conn, inv)
-        return inv
+            payment_store.sync_invoice(conn, inv_id)
+            _upsert_tenant(conn, inv, preserve_email=True)
+            conn.commit()
+            return get_invoice(inv_id)
+        except Exception:
+            conn.rollback()
+            raise
 
 
 # ---------- tenants ----------
@@ -353,17 +406,18 @@ def _row_to_tenant(row: sqlite3.Row) -> dict:
     return {camel: row[snake] for camel, snake in TENANT_MAP.items()}
 
 
-def _upsert_tenant(conn, inv: dict) -> None:
+def _upsert_tenant(conn, inv: dict, preserve_email: bool = False) -> None:
     key = ((inv.get("tenantMobile") or inv.get("tenantName") or "")).lower().strip()
     if not key:
         return
     now = _now_iso()
     conn.execute(
-        """INSERT INTO tenants (id, name, mobile, email, occupation, emergency_contact,
+        f"""INSERT INTO tenants (id, name, mobile, email, occupation, emergency_contact,
                room_number, bed_number, check_in, check_out, created_at, updated_at)
            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
            ON CONFLICT(id) DO UPDATE SET
-               name=excluded.name, mobile=excluded.mobile, email=excluded.email,
+               name=excluded.name, mobile=excluded.mobile,
+               email={'tenants.email' if preserve_email else 'excluded.email'},
                occupation=excluded.occupation, emergency_contact=excluded.emergency_contact,
                room_number=excluded.room_number, bed_number=excluded.bed_number,
                check_in=excluded.check_in, check_out=excluded.check_out,
@@ -425,9 +479,10 @@ def export_data() -> dict:
             "SELECT key, value FROM meta WHERE key LIKE 'seq-%'").fetchall()}
     return {
         "app": "Shree Stay Homes & PG Billing",
-        "version": 3,
+        "version": 4,
         "exportedAt": _now_iso(),
         "invoices": list_invoices(),
+        "payments": payment_store.list_payments(get_conn()),
         "tenants": list_tenants(),
         "expenses": list_expenses(),
         "foodOrders": list_food_orders(),
@@ -465,7 +520,7 @@ def import_data(data, mode: str = "merge") -> dict:
     settings = data.get("settings")
     counts = {"invoices_added": 0, "invoices_skipped": 0, "tenants_added": 0,
               "tenants_skipped": 0, "expenses_added": 0, "food_orders_added": 0,
-              "imports_added": 0, "settings_imported": False}
+              "imports_added": 0, "payments_added": 0, "settings_imported": False}
     valid = [i for i in invoices if isinstance(i, dict) and i.get("invoiceNumber")]
     with _lock:
         conn = get_conn()
@@ -482,6 +537,16 @@ def import_data(data, mode: str = "merge") -> dict:
                 conn.execute("INSERT OR " + ("REPLACE" if mode == "overwrite" else "IGNORE")
                              + _insert_sql()[len("INSERT"):], tuple(_params(inv).values()))
                 counts["invoices_added"] += 1
+                records = ([p for p in data["payments"] if p.get("invoiceId") == inv["id"]]
+                           if isinstance(data.get("payments"), list) else raw.get("payments"))
+                if isinstance(records, list):
+                    for payment in records:
+                        payment_store.insert(conn, inv["id"], payment, allow_advance=True, restored=True)
+                        counts["payments_added"] += 1
+                    payment_store.sync_invoice(conn, inv["id"])
+                else:
+                    payment_store.legacy_payment(conn, inv)
+                    counts["payments_added"] += int(inv["amountPaid"] > 0)
             for t in tenants:
                 if not isinstance(t, dict) or not t.get("id"):
                     continue
@@ -913,15 +978,21 @@ def tenant_ledger(tid: str):
                      "description": f"Invoice for {inv.get('billingMonth') or ''}".strip(),
                      "debit": charge, "credit": 0, "balance": round(balance, 2),
                      "previousBalance": round(prev, 2), "invoiceTotal": round(total, 2)})
-        amt = float(inv.get("amountPaid") or 0)
-        if amt > 0:
+        for payment in inv.get("payments", []):
+            amt = payment["amount"]
             balance -= amt
             paid += amt
-            rows.append({"date": date, "type": "payment", "invoiceId": inv["id"],
+            rows.append({"date": payment["paymentDate"], "type": "payment", "invoiceId": inv["id"],
                          "invoiceNumber": inv["invoiceNumber"], "billingMonth": inv.get("billingMonth"),
-                         "description": f"Payment ({inv.get('paymentMode') or 'Cash'})",
-                         "paymentMode": inv.get("paymentMode"), "transactionId": inv.get("transactionId"),
+                         "description": f"Payment ({payment['paymentMethod']})",
+                         "paymentId": payment["id"], "receiptNumber": payment["receiptNumber"],
+                         "paymentMode": payment["paymentMethod"], "transactionId": payment["reference"],
                          "debit": 0, "credit": round(amt, 2), "balance": round(balance, 2)})
+    rows.sort(key=lambda r: (r["date"], {"opening": 0, "invoice": 1, "payment": 2}[r["type"]]))
+    running = 0
+    for row in rows:
+        running += payment_store.cents(row["debit"]) - payment_store.cents(row["credit"])
+        row["balance"] = running / 100
     return {
         "tenant": tenant,
         "rows": rows,

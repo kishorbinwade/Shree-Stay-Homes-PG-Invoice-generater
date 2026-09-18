@@ -5,6 +5,7 @@ import Layout from "@/components/Layout";
 import Dashboard from "@/pages/Dashboard";
 import CreateInvoice from "@/pages/CreateInvoice";
 import History from "@/pages/History";
+import InvoiceDetails from "@/pages/InvoiceDetails";
 import Tenants from "@/pages/Tenants";
 import Settings from "@/pages/Settings";
 import Backup from "@/pages/Backup";
@@ -29,6 +30,7 @@ function App() {
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/invoices/new" element={<CreateInvoice />} />
             <Route path="/invoices/:id/edit" element={<CreateInvoice />} />
+            <Route path="/invoices/:id" element={<InvoiceDetails />} />
             <Route path="/history" element={<History />} />
             <Route path="/billing" element={<MonthlyBilling />} />
             <Route path="/overdue" element={<Overdue />} />

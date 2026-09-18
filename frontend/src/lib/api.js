@@ -1,21 +1,11 @@
 import { buildInvoicePDF, pdfToBase64, pdfFilename } from './pdf';
 
-// Backend URL resolution — works in BOTH the hosted preview and on a local PC
-// with the same code, so pushing/pulling never needs a config change:
-//  • Running on localhost (your computer)  -> always http://localhost:8001
-//  • Running anywhere else (preview/hosted) -> REACT_APP_BACKEND_URL
-function resolveBackend() {
-  if (typeof window !== 'undefined') {
-    const host = window.location.hostname;
-    if (host === 'localhost' || host === '127.0.0.1') {
-      return 'http://localhost:8001';
-    }
-  }
-  return process.env.REACT_APP_BACKEND_URL || 'http://localhost:8001';
-}
-const BACKEND = resolveBackend();
+// run-local.sh creates frontend/.env from .env.example for local use.
+// Never silently contact a different backend when configuration is missing.
+const BACKEND = process.env.REACT_APP_BACKEND_URL?.trim().replace(/\/+$/, '');
+if (!BACKEND) throw new Error('Set REACT_APP_BACKEND_URL in frontend/.env before starting the app.');
 const API = `${BACKEND}/api`;
-export const IS_LOCAL = BACKEND === 'http://localhost:8001';
+export const IS_LOCAL = ['localhost', '127.0.0.1', '[::1]'].includes(new URL(BACKEND).hostname);
 export const BACKEND_CONNECTION_ERROR = IS_LOCAL
   ? `Cannot reach the backend at ${BACKEND}. Start it with ./scripts/run-local.sh — invoices, history and settings need it running.`
   : 'Cannot reach the backend right now. Retrying automatically…';
@@ -83,6 +73,14 @@ export const createInvoice = (data) => req('/invoices', { method: 'POST', body: 
 export const updateInvoice = (id, data) => req(`/invoices/${id}`, { method: 'PUT', body: JSON.stringify(data) });
 export const removeInvoice = (id) => req(`/invoices/${id}`, { method: 'DELETE' });
 export const peekNextNumber = () => req('/invoices/next-number');
+
+// ---------- individual dated payments ----------
+export const fetchPayments = () => req('/payments');
+export const fetchInvoicePayments = (id) => req(`/invoices/${id}/payments`);
+export const createPayment = (data) => req('/payments', { method: 'POST', body: JSON.stringify(data) });
+export const updatePayment = (id, data) => req(`/payments/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+export const removePayment = (id) => req(`/payments/${id}`, { method: 'DELETE' });
+export const fetchPaymentReceipt = (id) => req(`/payments/${id}/receipt`);
 
 // ---------- tenants ----------
 export const fetchTenants = () => req('/tenants');
@@ -164,8 +162,11 @@ export function downloadViaUrl(url) {
 
 // ---------- email (Gmail SMTP via backend; PDF attached) ----------
 export async function deliverInvoiceEmail(invoice, settings) {
+  // Refresh balances while keeping the saved invoice's immutable tenant recipient.
+  invoice = await fetchInvoice(invoice.id);
   const doc = buildInvoicePDF(invoice, settings);
   const body = {
+    invoiceId: invoice.id,
     invoiceNumber: invoice.invoiceNumber,
     tenantName: invoice.tenantName,
     billingMonth: String(invoice.billingMonth || ''),
@@ -175,7 +176,6 @@ export async function deliverInvoiceEmail(invoice, settings) {
     paymentStatus: invoice.paymentStatus,
     ownerEmail: settings.ownerEmail,
     tenantEmail: invoice.tenantEmail || null,
-    sendToTenant: !!invoice.sendToTenant,
     pdfBase64: pdfToBase64(doc),
     pdfFilename: pdfFilename(invoice),
   };

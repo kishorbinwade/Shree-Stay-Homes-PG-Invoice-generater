@@ -3,6 +3,13 @@
 import os
 import sys
 import tempfile
+from pathlib import Path
+import base64
+import socket
+from email import policy
+from email.parser import BytesParser
+
+import pytest
 
 _TMP = tempfile.mkdtemp(prefix="shpg-test-")
 os.environ["DB_PATH"] = os.path.join(_TMP, "test.db")
@@ -12,8 +19,18 @@ os.environ["SMTP_APP_PASSWORD"] = ""
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import database  # noqa: E402
+# Keep hermetic DB empty for deterministic sequence assertions.
+database.SEED_PATH = Path(_TMP) / "seed_disabled_for_tests.json"
 import server  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
+
+try:
+    from aiosmtpd.controller import Controller  # noqa: E402
+    from aiosmtpd.smtp import AuthResult, LoginPassword  # noqa: E402
+except Exception:  # pragma: no cover
+    Controller = None
+    AuthResult = None
+    LoginPassword = None
 
 client = TestClient(server.app)
 
@@ -357,3 +374,310 @@ def test_tenant_ledger_opening_balance_and_404():
     assert led["rows"][0]["type"] == "opening" and led["rows"][0]["debit"] == 1500
     assert led["summary"]["totalBilled"] == 5500 and led["summary"]["outstanding"] == 5500
     assert client.get("/api/tenants/0000000000/ledger").status_code == 404
+
+
+# ---------- invoice email owner+tenant-cc / snapshot behavior ----------
+
+class _SinkAuth:
+    def __call__(self, server_, session, envelope, mechanism, auth_data):
+        ok = isinstance(auth_data, LoginPassword) and auth_data.password == b"secret"
+        return AuthResult(success=ok)
+
+
+class _SinkHandler:
+    def __init__(self):
+        self.messages = []
+
+    async def handle_DATA(self, server_, session, envelope):
+        self.messages.append({
+            "mail_from": envelope.mail_from,
+            "rcpt_tos": list(envelope.rcpt_tos),
+            "content": envelope.original_content if hasattr(envelope, "original_content") else envelope.content,
+        })
+        return "250 OK"
+
+
+@pytest.fixture
+def smtp_sink():
+    if Controller is None:
+        pytest.skip("aiosmtpd is not installed in this test environment")
+    handler = _SinkHandler()
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        port = s.getsockname()[1]
+    ctrl = Controller(
+        handler,
+        hostname="127.0.0.1",
+        port=port,
+        auth_require_tls=False,
+        authenticator=_SinkAuth(),
+    )
+    ctrl.start()
+    try:
+        yield {"handler": handler, "port": port}
+    finally:
+        ctrl.stop()
+
+
+def _set_local_smtp(monkeypatch, port):
+    monkeypatch.setattr(server, "SMTP_HOST", "127.0.0.1", raising=False)
+    monkeypatch.setattr(server, "SMTP_PORT", int(port), raising=False)
+    monkeypatch.setattr(server, "SMTP_USER", "owner@test.local", raising=False)
+    monkeypatch.setattr(server, "SMTP_APP_PASSWORD", "secret", raising=False)
+    monkeypatch.setattr(server, "SMTP_TLS", False, raising=False)
+    monkeypatch.setattr(server, "SMTP_CONFIGURED", True, raising=False)
+
+
+def _mk_pdf_bytes():
+    return b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n%%EOF\n"
+
+
+def test_loopback_one_message_owner_to_tenant_cc_with_pdf_attachment(smtp_sink, monkeypatch):
+    _set_local_smtp(monkeypatch, smtp_sink["port"])
+    pdf_bytes = _mk_pdf_bytes()
+    filename = "ShreeStayHomesPG_Invoice_SHPG-2026-9001.pdf"
+    refused = server._send_smtp_sync(
+        "shreehomestaypg@gmail.com",
+        "Invoice",
+        "<p>Attached invoice</p>",
+        pdf_bytes,
+        filename,
+        "rahul@example.com",
+    )
+    assert refused == {}
+    assert len(smtp_sink["handler"].messages) == 1
+    msg_raw = smtp_sink["handler"].messages[0]["content"]
+    if isinstance(msg_raw, str):
+        msg_raw = msg_raw.encode("utf-8")
+    parsed = BytesParser(policy=policy.default).parsebytes(msg_raw)
+    assert parsed["To"] == "shreehomestaypg@gmail.com"
+    assert parsed["Cc"] == "rahul@example.com"
+    assert smtp_sink["handler"].messages[0]["rcpt_tos"] == ["shreehomestaypg@gmail.com", "rahul@example.com"]
+    pdf_part = next(p for p in parsed.walk() if p.get_content_type() == "application/pdf")
+    assert pdf_part.get_filename() == filename
+    assert pdf_part.get_payload(decode=True) == pdf_bytes
+
+
+def test_loopback_missing_tenant_email_still_single_message_without_cc(smtp_sink, monkeypatch):
+    _set_local_smtp(monkeypatch, smtp_sink["port"])
+    server._send_smtp_sync(
+        "shreehomestaypg@gmail.com",
+        "Invoice",
+        "<p>Owner only</p>",
+        _mk_pdf_bytes(),
+        "ShreeStayHomesPG_Invoice_SHPG-2026-9002.pdf",
+        None,
+    )
+    assert len(smtp_sink["handler"].messages) == 1
+    msg_raw = smtp_sink["handler"].messages[0]["content"]
+    if isinstance(msg_raw, str):
+        msg_raw = msg_raw.encode("utf-8")
+    parsed = BytesParser(policy=policy.default).parsebytes(msg_raw)
+    assert parsed["To"] == "shreehomestaypg@gmail.com"
+    assert parsed.get("Cc") in (None, "")
+    assert smtp_sink["handler"].messages[0]["rcpt_tos"] == ["shreehomestaypg@gmail.com"]
+
+
+def test_loopback_same_owner_and_cc_deduplicates_envelope_recipient(smtp_sink, monkeypatch):
+    _set_local_smtp(monkeypatch, smtp_sink["port"])
+    owner = "same@example.com"
+    server._send_smtp_sync(owner, "Invoice", "<p>same</p>", _mk_pdf_bytes(), "a.pdf", owner)
+    assert len(smtp_sink["handler"].messages) == 1
+    assert smtp_sink["handler"].messages[0]["rcpt_tos"] == [owner]
+
+
+def test_api_create_invoice_uses_sqlite_tenant_email_snapshot_and_rejects_identity_mismatch(monkeypatch):
+    base = {
+        "tenantName": "Snapshot Rahul",
+        "tenantMobile": "9550011111",
+        "tenantEmail": "sqlite-rahul@example.com",
+        "billingMonth": "2026-10",
+        "rent": 5000,
+    }
+    seed = client.post("/api/invoices", json=base)
+    assert seed.status_code == 201
+    tenants = client.get("/api/tenants").json()
+    tenant = next(t for t in tenants if t["mobile"] == "9550011111")
+
+    req_payload = {
+        **base,
+        "tenantId": tenant["id"],
+        "tenantEmail": "browser-tamper@example.com",  # must be ignored in favor of SQLite tenant email
+        "amountPaid": 0,
+    }
+    create = client.post("/api/invoices", json=req_payload)
+    assert create.status_code == 201, create.text
+    assert create.json()["tenantEmail"] == "sqlite-rahul@example.com"
+
+    mismatch = client.post("/api/invoices", json={
+        **req_payload,
+        "tenantName": "Different Name",
+    })
+    assert mismatch.status_code == 422
+
+
+def test_email_resend_uses_invoice_snapshot_even_after_tenant_email_change(monkeypatch):
+    created = client.post("/api/invoices", json={
+        "tenantName": "Frozen CC",
+        "tenantMobile": "9550022222",
+        "tenantEmail": "old-cc@example.com",
+        "billingMonth": "2026-10",
+        "rent": 6500,
+    }).json()
+    tid = "9550022222"
+    upd_tenant = client.put(f"/api/tenants/{tid}", json={"email": "new-profile@example.com"})
+    assert upd_tenant.status_code == 200
+    assert client.get(f"/api/invoices/{created['id']}").json()["tenantEmail"] == "old-cc@example.com"
+
+    captured = {}
+
+    async def fake_send(to, subject, html, pdf_b64, filename, cc=None):
+        captured["to"] = to
+        captured["cc"] = cc
+        captured["filename"] = filename
+        return {}
+
+    monkeypatch.setattr(server, "SMTP_CONFIGURED", True, raising=False)
+    monkeypatch.setattr(server, "send_invoice_email", fake_send)
+
+    req = {
+        "invoiceId": created["id"],
+        "invoiceNumber": created["invoiceNumber"],
+        "tenantName": created["tenantName"],
+        "billingMonth": created["billingMonth"],
+        "total": created["total"],
+        "amountPaid": created["amountPaid"],
+        "balanceDue": created["balanceDue"],
+        "paymentStatus": created["paymentStatus"],
+        "ownerEmail": "ignored@example.com",
+        "tenantEmail": "tampered-payload@example.com",
+        "pdfBase64": base64.b64encode(_mk_pdf_bytes()).decode(),
+        "pdfFilename": "ignored.pdf",
+    }
+    sent = client.post("/api/email/invoice", json=req)
+    assert sent.status_code == 200, sent.text
+    assert captured["cc"] == "old-cc@example.com"
+    latest = client.get(f"/api/invoices/{created['id']}").json()
+    assert latest["emailStatus"]["owner"] == "sent"
+    assert latest["emailStatus"]["tenant"] == "included"
+
+
+def test_email_status_handles_partial_and_all_refusals(monkeypatch):
+    inv = client.post("/api/invoices", json={
+        "tenantName": "Refusal Test",
+        "tenantMobile": "9550033333",
+        "tenantEmail": "cc-refuse@example.com",
+        "billingMonth": "2026-10",
+        "rent": 7000,
+    }).json()
+    monkeypatch.setattr(server, "SMTP_CONFIGURED", True, raising=False)
+
+    async def owner_ok_cc_refused(*args, **kwargs):
+        return {"cc-refuse@example.com": (550, b"refused")}
+
+    monkeypatch.setattr(server, "send_invoice_email", owner_ok_cc_refused)
+    payload = {
+        "invoiceId": inv["id"],
+        "invoiceNumber": inv["invoiceNumber"],
+        "tenantName": inv["tenantName"],
+        "billingMonth": inv["billingMonth"],
+        "total": inv["total"],
+        "amountPaid": inv["amountPaid"],
+        "balanceDue": inv["balanceDue"],
+        "paymentStatus": inv["paymentStatus"],
+        "ownerEmail": "owner@example.com",
+        "tenantEmail": inv["tenantEmail"],
+        "pdfBase64": base64.b64encode(_mk_pdf_bytes()).decode(),
+        "pdfFilename": "x.pdf",
+    }
+    r1 = client.post("/api/email/invoice", json=payload)
+    assert r1.status_code == 200
+    assert r1.json()["owner"] == "sent"
+    assert r1.json()["tenant"] == "failed"
+
+    async def all_refused(*args, **kwargs):
+        return {
+            "shreehomestaypg@gmail.com": (550, b"owner refused"),
+            "cc-refuse@example.com": (550, b"cc refused"),
+        }
+
+    monkeypatch.setattr(server, "send_invoice_email", all_refused)
+    r2 = client.post("/api/email/invoice", json=payload)
+    assert r2.status_code == 200
+    assert r2.json()["owner"] == "failed"
+    assert r2.json()["tenant"] == "failed"
+
+
+def test_email_endpoint_persists_owner_failed_and_supports_retry_record(monkeypatch):
+    inv = client.post("/api/invoices", json={
+        "tenantName": "No SMTP",
+        "tenantMobile": "9550044444",
+        "tenantEmail": "",
+        "billingMonth": "2026-10",
+        "rent": 4000,
+    }).json()
+    monkeypatch.setattr(server, "SMTP_CONFIGURED", False, raising=False)
+    payload = {
+        "invoiceId": inv["id"],
+        "invoiceNumber": inv["invoiceNumber"],
+        "tenantName": inv["tenantName"],
+        "billingMonth": inv["billingMonth"],
+        "total": inv["total"],
+        "amountPaid": inv["amountPaid"],
+        "balanceDue": inv["balanceDue"],
+        "paymentStatus": inv["paymentStatus"],
+        "ownerEmail": "owner@example.com",
+        "tenantEmail": None,
+        "pdfBase64": base64.b64encode(_mk_pdf_bytes()).decode(),
+        "pdfFilename": "x.pdf",
+    }
+    r = client.post("/api/email/invoice", json=payload)
+    assert r.status_code == 503
+    latest = client.get(f"/api/invoices/{inv['id']}").json()
+    assert latest["emailStatus"]["owner"] == "failed"
+    assert latest["emailStatus"]["tenant"] == "no-email"
+
+
+def test_resend_after_tenant_deleted_does_not_recreate_tenant(monkeypatch):
+    inv = client.post("/api/invoices", json={
+        "tenantName": "Deleted Tenant",
+        "tenantMobile": "9550055555",
+        "tenantEmail": "deleted-tenant@example.com",
+        "billingMonth": "2026-11",
+        "rent": 5000,
+    }).json()
+    tid = "9550055555"
+    assert client.delete(f"/api/tenants/{tid}").status_code == 200
+    assert client.get(f"/api/tenants/{tid}").status_code == 404
+
+    monkeypatch.setattr(server, "SMTP_CONFIGURED", True, raising=False)
+
+    async def fake_send(*args, **kwargs):
+        return {}
+
+    monkeypatch.setattr(server, "send_invoice_email", fake_send)
+    payload = {
+        "invoiceId": inv["id"],
+        "invoiceNumber": inv["invoiceNumber"],
+        "tenantName": inv["tenantName"],
+        "billingMonth": inv["billingMonth"],
+        "total": inv["total"],
+        "amountPaid": inv["amountPaid"],
+        "balanceDue": inv["balanceDue"],
+        "paymentStatus": inv["paymentStatus"],
+        "ownerEmail": "owner@example.com",
+        "tenantEmail": "tampered@example.com",
+        "pdfBase64": base64.b64encode(_mk_pdf_bytes()).decode(),
+        "pdfFilename": "x.pdf",
+    }
+    resend = client.post("/api/email/invoice", json=payload)
+    assert resend.status_code == 200
+    assert client.get(f"/api/tenants/{tid}").status_code == 404
+
+
+def test_no_smtp_secrets_exposed_in_read_apis_after_email_errors():
+    for path in ("/api/settings", "/api/invoices", "/api/backup/export"):
+        body = client.get(path).text
+        assert "SMTP_USER" not in body
+        assert "SMTP_APP_PASSWORD" not in body

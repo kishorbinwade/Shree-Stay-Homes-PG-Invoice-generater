@@ -1,0 +1,8 @@
+EMAIL_FROM_NAME="Shree Stay Homes & PG"
+EMAIL_REPLY_TO="shreehomestaypg@gmail.com"
+CORS_ORIGINS="http://localhost:3000,https://3d660222-2df6-49bb-9a31-69258ae85880.preview.emergentagent.com"
+SMTP_HOST="smtp.gmail.com"
+SMTP_PORT="587"
+SMTP_TLS="true"
+SMTP_USER=
+SMTP_APP_PASSWORD=

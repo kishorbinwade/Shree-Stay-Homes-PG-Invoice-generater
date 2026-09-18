@@ -48,7 +48,7 @@ export function paymentStatusOf(total, amountPaid) {
   return 'Partially Paid';
 }
 
-export const PAYMENT_MODES = ['Cash', 'UPI', 'Bank Transfer', 'Other'];
+export const PAYMENT_MODES = ['Cash', 'UPI', 'Bank Transfer', 'Card', 'Other'];
 
 export function waReminderLink(inv, businessName) {
   let digits = String(inv.tenantMobile || '').replace(/\D/g, '');

@@ -3,9 +3,9 @@ import { useNavigate, Link } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
   Search, Eye, Download, Printer, Mail, Copy, Pencil, Trash2, ArrowUpDown,
-  FileText, Loader2, FilePlus2, MessageCircle,
+  FileText, Loader2, FilePlus2, MessageCircle, IndianRupee,
 } from 'lucide-react';
-import { fetchInvoices, removeInvoice, updateInvoice } from '../lib/api';
+import { fetchInvoices, removeInvoice } from '../lib/api';
 import { inr, fmtDate, monthLabel, waReminderLink } from '../lib/format';
 import { buildInvoicePDF, downloadPDF, printPDF } from '../lib/pdf';
 import { deliverInvoiceEmail } from '../lib/api';
@@ -19,13 +19,15 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '../components/ui/alert-dialog';
 import InvoicePreview from '../components/InvoicePreview';
+import { notifyInvoiceEmail } from '../lib/emailStatus';
 
 function StatusBadge({ status }) {
   const cls = status === 'Paid' ? 'bg-green-50 text-green-700' : status === 'Pending' ? 'bg-red-50 text-red-700' : 'bg-amber-50 text-amber-700';
-  return <span className={`whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-medium ${cls}`}>{status}</span>;
+  return <span className={`whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-medium ${cls}`}>{status === 'Pending' ? 'UNPAID' : status?.toUpperCase()}</span>;
 }
 
 function EmailBadge({ es }) {
+  if (es?.owner === 'sent' && es?.tenant === 'failed') return <span className="whitespace-nowrap rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-700">CC failed</span>;
   if (es?.owner === 'sent') return <span className="whitespace-nowrap rounded-full bg-green-50 px-2.5 py-0.5 text-xs font-medium text-green-700">Emailed</span>;
   if (es?.owner === 'failed') return <span className="whitespace-nowrap rounded-full bg-red-50 px-2.5 py-0.5 text-xs font-medium text-red-700">Failed</span>;
   return <span className="whitespace-nowrap rounded-full bg-stone-100 px-2.5 py-0.5 text-xs font-medium text-stone-500">Not sent</span>;
@@ -73,15 +75,12 @@ export default function History() {
   const handleResend = async (inv) => {
     setBusyId(inv.id);
     try {
-      const res = await deliverInvoiceEmail({ ...inv, sendToTenant: !!inv.sendToTenant }, settings);
-      await updateInvoice(inv.id, { ...inv, emailStatus: { owner: res.owner, tenant: res.tenant, at: new Date().toISOString() } });
-      if (res.owner === 'sent') toast.success(`Resent to owner (${settings.ownerEmail}) with PDF attached`);
-      else toast.error(res.errors?.owner || 'Resend failed');
-      if (res.tenant === 'sent') toast.success('Copy sent to tenant');
-      reload();
+      const res = await deliverInvoiceEmail(inv, settings);
+      notifyInvoiceEmail(res);
     } catch (e) {
       toast.error(e.message || 'Resend failed');
     } finally {
+      reload();
       setBusyId('');
     }
   };
@@ -113,7 +112,7 @@ export default function History() {
             <SelectItem value="all">All Status</SelectItem>
             <SelectItem value="Paid">Paid</SelectItem>
             <SelectItem value="Partially Paid">Partially Paid</SelectItem>
-            <SelectItem value="Pending">Pending</SelectItem>
+            <SelectItem value="Pending" data-testid="history-status-unpaid">Unpaid</SelectItem>
           </SelectContent>
         </Select>
         <Button variant="outline" onClick={() => setSortAsc((s) => !s)} data-testid="history-sort-btn" className="border-stone-200">
@@ -153,7 +152,7 @@ export default function History() {
               <tbody>
                 {invoices.map((inv) => (
                   <tr key={inv.id} className="border-b border-stone-100 transition-colors duration-150 hover:bg-stone-50" data-testid={`history-row-${inv.invoiceNumber}`}>
-                    <td className="px-4 py-3 font-semibold text-stone-900">{inv.invoiceNumber}</td>
+                    <td className="px-4 py-3 font-semibold text-stone-900"><Link to={`/invoices/${inv.id}`} data-testid={`invoice-details-${inv.invoiceNumber}`} className="hover:text-terracotta-600">{inv.invoiceNumber}</Link></td>
                     <td className="whitespace-nowrap px-4 py-3 text-stone-600">{fmtDate(inv.invoiceDate)}</td>
                     <td className="px-4 py-3 text-stone-900">{inv.tenantName}</td>
                     <td className="whitespace-nowrap px-4 py-3 text-stone-600">{inv.roomNumber || '-'}/{inv.bedNumber || '-'}</td>
@@ -162,9 +161,10 @@ export default function History() {
                     <td className="whitespace-nowrap px-4 py-3 text-right text-green-700">{inr(inv.amountPaid)}</td>
                     <td className={`whitespace-nowrap px-4 py-3 text-right font-medium ${Number(inv.balanceDue) > 0 ? 'text-red-600' : 'text-stone-500'}`}>{inr(Math.max(Number(inv.balanceDue) || 0, 0))}</td>
                     <td className="px-4 py-3"><StatusBadge status={inv.paymentStatus} /></td>
-                    <td className="px-4 py-3"><EmailBadge es={inv.emailStatus} /></td>
+                    <td className="px-4 py-3" data-testid={`history-email-status-${inv.invoiceNumber}`}><EmailBadge es={inv.emailStatus} /></td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-1">
+                        <Button variant="ghost" size="icon" title="Record Payment" disabled={inv.balanceDue <= 0} onClick={() => navigate(`/invoices/${inv.id}?record=1`)} data-testid={`record-payment-${inv.invoiceNumber}`}><IndianRupee className="h-4 w-4 text-green-700" /></Button>
                         <Button variant="ghost" size="icon" title="View" onClick={() => setViewing(inv)} data-testid={`view-invoice-${inv.invoiceNumber}`}><Eye className="h-4 w-4 text-stone-500" /></Button>
                         <Button variant="ghost" size="icon" title="Download PDF" onClick={() => handleDownload(inv)} data-testid={`download-invoice-${inv.invoiceNumber}`}><Download className="h-4 w-4 text-stone-500" /></Button>
                         <Button variant="ghost" size="icon" title="Print" onClick={() => handlePrint(inv)} data-testid={`print-invoice-${inv.invoiceNumber}`}><Printer className="h-4 w-4 text-stone-500" /></Button>
@@ -196,6 +196,7 @@ export default function History() {
           <DialogHeader><DialogTitle className="font-heading">Invoice {viewing?.invoiceNumber}</DialogTitle></DialogHeader>
           {viewing && <InvoicePreview invoice={viewing} settings={settings} />}
           <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => viewing && navigate(`/invoices/${viewing.id}`)} data-testid="history-view-payments-btn">Payments</Button>
             <Button variant="outline" onClick={() => viewing && handlePrint(viewing)} data-testid="history-view-print-btn" className="border-stone-200 bg-white"><Printer className="mr-2 h-4 w-4" /> Print</Button>
             <Button onClick={() => viewing && handleDownload(viewing)} data-testid="history-view-download-btn" className="bg-terracotta-500 text-white hover:bg-terracotta-600"><Download className="mr-2 h-4 w-4" /> Download PDF</Button>
           </div>

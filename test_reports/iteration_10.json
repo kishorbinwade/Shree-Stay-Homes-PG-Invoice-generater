@@ -1,0 +1,53 @@
+{
+  "summary": "Completed requested local functional completion checks for remaining payments/email scope. Added persistent backend regression coverage for backup restore exactness, payment CRUD impact on overdue/reports/ledger, end-to-end /api/email/invoice route->local SMTP transport with retry, and optional two-parallel-payment race correctness. Full backend suite in /root/shpg-mail-test-venv passed (45 passed, 4 skipped). Browser-driven receipt download was executed and downloaded PDFs were parsed successfully via local pypdf. UI tenant-switch/retry-email checks were attempted but not fully completed due 3 repeated Playwright flow failures during the same receipt/download script path (loop-prevention stop applied).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "Playwright end-to-end composite flow for receipt download + tenant-switch/retry checks",
+        "issue": "Could not complete all UI assertions in one automated run after 3 repeated script failures in same flow path; stopped per loop-prevention rule. This is a test-run limitation, not a confirmed product defect.",
+        "affected_selectors": [
+          "[data-testid^='payment-receipt-']",
+          "[data-testid='invoice-details-download']",
+          "[data-testid='invoice-email-cc']",
+          "[data-testid='retry-email-btn']"
+        ]
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_payments_regression.py",
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/iteration_10_payments_extended.xml",
+    "/app/test_reports/pytest/iteration_10_full.xml",
+    "/root/.emergent/automation_output/20260918_165845/console_20260918_165845.log"
+  ],
+  "action_items": [
+    "Run a fresh isolated Playwright script ONLY for case (5) tenant switching + retry-email UI to produce final UI evidence (previous composite run stopped after 3 failures per guardrail).",
+    "Run one isolated Playwright script ONLY for invoice PDF download assertion to capture explicit evidence that invoice PDF keeps original total after multiple payments.",
+    "Optional code-hardening review: frontend/src/lib/api.js currently includes localhost hardcoded fallback/default values; this conflicts with strict env-only URL policy in testing guidelines."
+  ],
+  "critical_code_review_comments": [
+    "backend payment/email route logic passed requested functional checks including route->SMTP transport and persistence semantics.",
+    "frontend/src/lib/api.js resolves localhost with hardcoded fallback URL; violates strict env-only configuration principle and can mask misconfiguration.",
+    "SMTP credentials were verified absent from API responses and from hermetic SQLite test DB artifacts in new route-level SMTP tests."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_payments_regression.py",
+    "/app/test_reports/iteration_10.json"
+  ],
+  "success_rate": {
+    "backend": "100%",
+    "frontend": "60%"
+  },
+  "seed_data_creation": "Created preview-only TEST_UI_RCP_* invoices during browser receipt flow; cleaned up all tracked TEST_UI_RCP_* and prior TEST_UI_PAY_750256 invoices/tenants via public API after testing.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend completion cases now covered in test_payments_regression.py: backup restore exactness, overdue/report/ledger CRUD linkage, /api/email/invoice transport via aiosmtpd with retry, and two-parallel-payment correctness. Browser receipt download succeeded and files exist in /tmp (ShreeStayHomesPG_Receipt_*.pdf) with parsed text confirming required receipt fields. Composite Playwright flow failed 3 times before reaching tenant-switch assertions; stop condition applied.",
+  "rca of the issue": "No product bug confirmed from backend scope. Remaining gap is evidence completeness for two UI-only checks caused by automation-flow fragility: first run failed on async download context usage, second run failed from weak binary PDF parsing strategy, third run failed from strict receipt-number regex extraction despite receipt text being present when parsed locally with pypdf. Mitigation: split UI checks into smaller independent scripts (receipt-only, invoice-pdf-only, tenant-switch-only) to avoid cascading aborts."
+}

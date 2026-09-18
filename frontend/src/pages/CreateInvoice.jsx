@@ -21,6 +21,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import InvoicePreview from '../components/InvoicePreview';
 import { TenantNameInput } from '../components/TenantNameInput';
+import { InvoiceEmailRecipients } from '../components/InvoiceEmailRecipients';
+import { notifyInvoiceEmail } from '../lib/emailStatus';
 
 const EMPTY = {
   tenantName: '', tenantEmail: '', tenantMobile: '', roomNumber: '', bedNumber: '',
@@ -29,6 +31,7 @@ const EMPTY = {
   rent: '', securityDeposit: '', electricity: '', food: '', maintenance: '',
   otherCharges: '', discount: '', previousBalance: '',
   amountPaid: '', paymentMode: 'Cash', transactionId: '',
+  paymentDate: todayISO(),
   sendToTenant: false, allowAdvance: false,
 };
 
@@ -50,6 +53,8 @@ export default function CreateInvoice() {
   const { settings } = useSettings();
   const { id } = useParams();
   const [searchParams] = useSearchParams();
+  const duplicateId = searchParams.get('from');
+  const tenantQueryId = searchParams.get('tenant');
   const navigate = useNavigate();
 
   const [form, setForm] = useState(EMPTY);
@@ -61,12 +66,15 @@ export default function CreateInvoice() {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [editId, setEditId] = useState(null);
   const [tenants, setTenants] = useState([]);
+  const [selectedTenantId, setSelectedTenantId] = useState('');
+  const [sendEmail, setSendEmail] = useState(!!settings.autoOwnerEmail);
 
   useEffect(() => {
     if (!id) fetchTenants().then(setTenants).catch(() => {});
   }, [id]);
 
   const applyTenant = (t) => {
+    setSelectedTenantId(t.id);
     setForm((f) => ({
       ...f, tenantName: t.name || '', tenantEmail: t.email || '', tenantMobile: t.mobile || '',
       roomNumber: t.roomNumber || '', bedNumber: t.bedNumber || '', occupation: t.occupation || '',
@@ -81,9 +89,15 @@ export default function CreateInvoice() {
   }, [result?.invoiceNumber]);
 
   useEffect(() => {
+    let cancelled = false;
+    setForm(EMPTY);
+    setResult(null);
+    setEditId(null);
+    setSelectedTenantId('');
     const load = async () => {
       if (id) {
         const inv = await fetchInvoice(id);
+        if (cancelled) return;
         if (inv) {
           setForm({ ...EMPTY, ...inv, sendToTenant: !!inv.sendToTenant, allowAdvance: Number(inv.amountPaid) > Number(inv.total) });
           setResult(inv);
@@ -92,30 +106,45 @@ export default function CreateInvoice() {
           toast.error('Invoice not found');
           navigate('/history');
         }
-      } else if (searchParams.get('from')) {
-        const src = await fetchInvoice(searchParams.get('from'));
+      } else if (duplicateId) {
+        const src = await fetchInvoice(duplicateId);
+        const tenant = src ? await fetchTenant(src.tenantMobile || src.tenantName.toLowerCase()).catch(() => null) : null;
+        if (cancelled) return;
         if (src) {
-          setForm({ ...EMPTY, ...src, amountPaid: '', transactionId: '', paymentMode: 'Cash', sendToTenant: false });
+          setSelectedTenantId(tenant?.id || '');
+          setForm({ ...EMPTY, ...src, tenantName: tenant?.name || src.tenantName,
+            tenantMobile: tenant?.mobile || src.tenantMobile,
+            tenantEmail: tenant ? tenant.email || '' : src.tenantEmail || '',
+            amountPaid: '', transactionId: '', paymentMode: 'Cash', sendToTenant: false });
           toast.success('Invoice duplicated — adjust details and generate');
         }
-      } else if (searchParams.get('tenant')) {
-        const t = await fetchTenant(searchParams.get('tenant'));
+      } else if (tenantQueryId) {
+        const t = await fetchTenant(tenantQueryId);
+        if (cancelled) return;
         if (t) {
+          setSelectedTenantId(t.id);
           setForm((f) => ({
-            ...f, tenantName: t.name, tenantEmail: t.email, tenantMobile: t.mobile,
-            roomNumber: t.roomNumber, bedNumber: t.bedNumber, occupation: t.occupation,
-            emergencyContact: t.emergencyContact, checkIn: t.checkIn, checkOut: t.checkOut,
+            ...f, tenantName: t.name || '', tenantEmail: t.email || '', tenantMobile: t.mobile || '',
+            roomNumber: t.roomNumber || '', bedNumber: t.bedNumber || '', occupation: t.occupation || '',
+            emergencyContact: t.emergencyContact || '', checkIn: t.checkIn || '', checkOut: t.checkOut || '',
           }));
         }
       }
     };
     load().catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
+    return () => { cancelled = true; };
+  }, [id, duplicateId, tenantQueryId, navigate]);
 
   const set = (k) => (e) => {
     const v = e?.target ? e.target.value : e;
-    setForm((f) => ({ ...f, [k]: v }));
+    // Typing another name must clear the previous selection before a new tenant is picked.
+    if ((k === 'tenantName' || k === 'tenantMobile') && selectedTenantId && !editId) {
+      setSelectedTenantId('');
+      setForm((f) => ({ ...f, tenantEmail: '', tenantMobile: '', roomNumber: '', bedNumber: '',
+        occupation: '', emergencyContact: '', checkIn: '', checkOut: '', [k]: v }));
+    } else {
+      setForm((f) => ({ ...f, [k]: v }));
+    }
     setErrors((er) => ({ ...er, [k]: undefined }));
   };
 
@@ -133,7 +162,6 @@ export default function CreateInvoice() {
       .forEach((k) => { if (num(form[k]) < 0) e[k] = 'Amount cannot be negative'; });
     if (num(form.discount) > totals.subtotal) e.discount = 'Discount cannot exceed subtotal';
     if (!form.allowAdvance && num(form.amountPaid) > totals.total) e.amountPaid = 'Amount paid exceeds total — tick "Allow advance" if intentional';
-    if (form.sendToTenant && !form.tenantEmail.trim()) e.tenantEmail = 'Tenant email required to send invoice to tenant';
     return e;
   };
 
@@ -155,7 +183,7 @@ export default function CreateInvoice() {
       total: totals.total,
       balanceDue: totals.balanceDue,
       paymentStatus: paymentStatusOf(totals.total, form.amountPaid),
-      emailStatus: existing?.emailStatus || { owner: 'pending', tenant: form.sendToTenant ? 'pending' : 'skipped' },
+      emailStatus: existing?.emailStatus || { owner: 'pending', tenant: form.tenantEmail ? 'pending' : 'no-email' },
       createdAt: existing?.createdAt || now,
       updatedAt: now,
     };
@@ -167,20 +195,15 @@ export default function CreateInvoice() {
       const res = await deliverInvoiceEmail(invoice, settings);
       const updated = {
         ...invoice,
-        emailStatus: { owner: res.owner, tenant: res.tenant, at: new Date().toISOString() },
+        emailStatus: res,
       };
-      await apiUpdateInvoice(invoice.id, updated);
       setResult(updated);
-      if (res.owner === 'sent') toast.success(`Invoice emailed to owner (${settings.ownerEmail}) with PDF attached`);
-      else toast.error(res.errors?.owner || 'Owner email failed — use Retry Email');
-      if (invoice.sendToTenant) {
-        if (res.tenant === 'sent') toast.success(`Copy emailed to tenant (${invoice.tenantEmail})`);
-        else if (res.tenant === 'no-email') toast.warning('Tenant email not provided');
-        else if (res.tenant !== 'skipped') toast.error('Tenant email failed');
-      }
+      notifyInvoiceEmail(res);
     } catch (err) {
-      const updated = { ...invoice, emailStatus: { owner: 'failed', tenant: invoice.sendToTenant ? 'failed' : 'skipped', error: err.message } };
-      await apiUpdateInvoice(invoice.id, updated);
+      const latest = await fetchInvoice(invoice.id).catch(() => null);
+      const updated = { ...invoice, emailStatus: latest?.emailStatus?.owner === 'failed'
+        ? latest.emailStatus
+        : { owner: 'failed', tenant: invoice.tenantEmail ? 'failed' : 'no-email', error: err.message } };
       setResult(updated);
       toast.error(err.message || 'Email failed');
     } finally {
@@ -199,18 +222,22 @@ export default function CreateInvoice() {
     try {
       const payload = {
         ...form,
+        tenantId: editId ? null : selectedTenantId || null,
+        emailStatus: result?.emailStatus || { owner: 'pending', tenant: form.tenantEmail ? 'pending' : 'no-email' },
         rent: num(form.rent), securityDeposit: num(form.securityDeposit), electricity: num(form.electricity),
         food: num(form.food), maintenance: num(form.maintenance), otherCharges: num(form.otherCharges),
         discount: num(form.discount), previousBalance: num(form.previousBalance), amountPaid: num(form.amountPaid),
         tenantName: form.tenantName.trim(), tenantEmail: form.tenantEmail.trim(), tenantMobile: form.tenantMobile.trim(),
         invoiceDate: result?.invoiceDate || todayISO(),
       };
+      if (editId) delete payload.amountPaid;
       const saved = editId ? await apiUpdateInvoice(editId, payload) : await apiCreateInvoice(payload);
       setResult(saved);
       setEditId(saved.id);
+      setForm((f) => ({ ...f, tenantEmail: saved.tenantEmail || '', amountPaid: saved.amountPaid }));
       peekNextNumber().then((d) => setNextNumber(d.nextNumber)).catch(() => {});
       toast.success(`Invoice ${saved.invoiceNumber} generated and saved`);
-      if (settings.autoOwnerEmail || (settings.tenantEmailEnabled && form.sendToTenant)) {
+      if (sendEmail) {
         await runEmail(saved);
       }
     } catch (err) {
@@ -235,6 +262,8 @@ export default function CreateInvoice() {
 
   const handleClear = () => {
     setForm(EMPTY);
+    setSelectedTenantId('');
+    setSendEmail(!!settings.autoOwnerEmail);
     setErrors({});
     setResult(null);
     setEditId(null);
@@ -242,9 +271,10 @@ export default function CreateInvoice() {
   };
 
   const emailBadge = (st) => {
+    if (st === 'included') return <span className="flex items-center gap-1.5 text-sm text-green-700"><CheckCircle2 className="h-4 w-4" /> Included</span>;
     if (st === 'sent') return <span className="flex items-center gap-1.5 text-sm text-green-700"><CheckCircle2 className="h-4 w-4" /> Sent</span>;
     if (st === 'failed') return <span className="flex items-center gap-1.5 text-sm text-red-600"><XCircle className="h-4 w-4" /> Failed</span>;
-    if (st === 'no-email') return <span className="flex items-center gap-1.5 text-sm text-amber-700"><AlertTriangle className="h-4 w-4" /> Tenant email not provided</span>;
+    if (st === 'no-email') return <span className="flex items-center gap-1.5 text-sm text-amber-700"><AlertTriangle className="h-4 w-4" /> No email provided</span>;
     return <span className="text-sm text-stone-400">Not sent</span>;
   };
 
@@ -272,9 +302,10 @@ export default function CreateInvoice() {
               <CheckCircle2 className="h-5 w-5" />
               <span className="font-semibold">Invoice {result.invoiceNumber} saved successfully.</span>
             </div>
-            <div className="flex items-center gap-6 text-sm" data-testid="email-status-panel">
+            <Button asChild variant="outline"><Link to={`/invoices/${result.id}`} data-testid="manage-invoice-payments">Payments &amp; Receipts</Link></Button>
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-3 text-sm" data-testid="email-status-panel">
               <span className="flex items-center gap-2 text-stone-500">Owner: <span data-testid="email-status-owner">{emailBadge(result.emailStatus?.owner)}</span></span>
-              <span className="flex items-center gap-2 text-stone-500">Tenant: <span data-testid="email-status-tenant">{emailBadge(result.emailStatus?.tenant)}</span></span>
+              <span className="flex items-center gap-2 text-stone-500">Tenant CC: <span data-testid="email-status-tenant">{emailBadge(result.emailStatus?.tenant)}</span></span>
               {(result.emailStatus?.owner === 'failed' || result.emailStatus?.tenant === 'failed') && (
                 <Button size="sm" variant="outline" onClick={() => runEmail(result)} disabled={emailing} data-testid="retry-email-btn" className="border-stone-200 bg-white">
                   {emailing ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="mr-1.5 h-3.5 w-3.5" />}
@@ -304,7 +335,7 @@ export default function CreateInvoice() {
             <h2 className="font-heading text-lg font-bold text-stone-900">Tenant Details</h2>
             <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field label="Tenant / Guest Name" required error={errors.tenantName} testId="tenant-name">
-                {id ? (
+                {editId ? (
                   <Input value={form.tenantName} onChange={set('tenantName')} placeholder="e.g. Rahul Sharma" data-testid="tenant-name" className={inputCls} />
                 ) : (
                   <TenantNameInput value={form.tenantName} onChange={set('tenantName')} onSelect={applyTenant} tenants={tenants} placeholder="Type to search existing tenants or enter a new name" data-testid="tenant-name" className={inputCls} />
@@ -314,7 +345,7 @@ export default function CreateInvoice() {
                 <Input value={form.tenantMobile} onChange={set('tenantMobile')} placeholder="10-digit mobile" maxLength={10} data-testid="tenant-mobile" className={inputCls} />
               </Field>
               <Field label="Tenant Email" error={errors.tenantEmail} testId="tenant-email">
-                <Input type="email" value={form.tenantEmail} onChange={set('tenantEmail')} placeholder="optional" data-testid="tenant-email" className={inputCls} />
+                <Input type="email" value={form.tenantEmail} readOnly={!!selectedTenantId || !!editId} onChange={set('tenantEmail')} placeholder="optional" data-testid="tenant-email" className={inputCls} />
               </Field>
               <Field label="Occupation" testId="occupation">
                 <Input value={form.occupation} onChange={set('occupation')} placeholder="e.g. Student, IT Professional" data-testid="occupation" className={inputCls} />
@@ -351,7 +382,7 @@ export default function CreateInvoice() {
                 ['previousBalance', 'Previous Balance', 'charge-previous-balance'],
               ].map(([key, label, tid]) => (
                 <Field key={key} label={label} error={errors[key]} testId={tid}>
-                  <Input type="number" min="0" step="0.01" inputMode="decimal" value={form[key]} onChange={set(key)} placeholder="0.00" data-testid={tid} className={inputCls} />
+                  <Input type="number" min="0" step="0.01" inputMode="decimal" readOnly={!!editId} value={form[key]} onChange={set(key)} placeholder="0.00" data-testid={tid} className={inputCls} />
                 </Field>
               ))}
             </div>
@@ -361,8 +392,9 @@ export default function CreateInvoice() {
             <h2 className="font-heading text-lg font-bold text-stone-900">Payment</h2>
             <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field label="Amount Paid (₹)" error={errors.amountPaid} testId="amount-paid">
-                <Input type="number" min="0" step="0.01" inputMode="decimal" value={form.amountPaid} onChange={set('amountPaid')} placeholder="0.00" data-testid="amount-paid" className={inputCls} />
+                <Input type="number" min="0" step="0.01" inputMode="decimal" readOnly={!!editId} value={form.amountPaid} onChange={set('amountPaid')} placeholder="0.00" data-testid="amount-paid" className={inputCls} />
               </Field>
+              {!editId && <Field label="Payment Date" testId="initial-payment-date"><Input type="date" value={form.paymentDate} onChange={set('paymentDate')} data-testid="initial-payment-date" className={inputCls} /></Field>}
               <Field label="Payment Mode" testId="payment-mode">
                 <Select value={form.paymentMode} onValueChange={set('paymentMode')}>
                   <SelectTrigger data-testid="payment-mode" className={inputCls}><SelectValue /></SelectTrigger>
@@ -379,15 +411,10 @@ export default function CreateInvoice() {
                   <Checkbox checked={form.allowAdvance} onCheckedChange={(v) => set('allowAdvance')(!!v)} data-testid="allow-advance" />
                   Allow advance / credit (paid &gt; total)
                 </label>
-                {settings.tenantEmailEnabled && (
-                  <label className="flex items-center gap-2 text-sm text-stone-700">
-                    <Checkbox checked={form.sendToTenant} onCheckedChange={(v) => set('sendToTenant')(!!v)} data-testid="send-to-tenant" />
-                    Send invoice to tenant
-                  </label>
-                )}
               </div>
             </div>
           </section>
+          <InvoiceEmailRecipients enabled={sendEmail} onEnabledChange={setSendEmail} ownerEmail={settings.ownerEmail} tenantEmail={form.tenantEmail} />
         </div>
 
         <div className="lg:col-span-4">
@@ -437,10 +464,6 @@ export default function CreateInvoice() {
                   Email Invoice
                 </Button>
               </div>
-              <p className="mt-3 text-[11px] leading-relaxed text-stone-400">
-                Generating saves the invoice on this device and emails the PDF to {settings.ownerEmail}
-                {form.sendToTenant ? ' and the tenant.' : '.'}
-              </p>
             </div>
           </div>
         </div>

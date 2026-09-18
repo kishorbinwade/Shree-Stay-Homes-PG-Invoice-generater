@@ -137,12 +137,8 @@ export default function Settings() {
           </div>
           <div className="flex flex-col justify-end gap-4 pb-1">
             <label className="flex items-center justify-between gap-3 text-sm text-stone-700">
-              Email every invoice to owner automatically
+              Enable invoice email by default
               <Switch checked={form.autoOwnerEmail} onCheckedChange={(v) => set('autoOwnerEmail')(v)} data-testid="settings-auto-owner-email" />
-            </label>
-            <label className="flex items-center justify-between gap-3 text-sm text-stone-700">
-              Show "Send invoice to tenant" option
-              <Switch checked={form.tenantEmailEnabled} onCheckedChange={(v) => set('tenantEmailEnabled')(v)} data-testid="settings-tenant-email-option" />
             </label>
           </div>
         </div>

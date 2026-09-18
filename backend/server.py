@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import FastAPI, APIRouter, HTTPException, Body
 from fastapi.responses import JSONResponse, Response
 from dotenv import load_dotenv
@@ -145,6 +145,7 @@ def inr(n) -> str:
 
 
 class InvoiceEmailRequest(BaseModel):
+    invoiceId: Optional[str] = None
     invoiceNumber: str
     tenantName: str
     billingMonth: str
@@ -184,16 +185,18 @@ def invoice_email_html(d: InvoiceEmailRequest) -> str:
     )
 
 
-async def send_invoice_email(to: str, subject: str, html: str, pdf_b64: str, filename: str) -> None:
+async def send_invoice_email(to: str, subject: str, html: str, pdf_b64: str, filename: str, cc: Optional[str] = None) -> dict:
     """Send one invoice email via Gmail SMTP with the PDF attached."""
     _assert_safe_email(subject, html)
-    await send_smtp_email(to, subject, html, pdf_b64, filename)
+    return await send_smtp_email(to, subject, html, pdf_b64, filename, cc)
 
 
-def _send_smtp_sync(to: str, subject: str, html: str, pdf_bytes: bytes, filename: str) -> None:
+def _send_smtp_sync(to: str, subject: str, html: str, pdf_bytes: bytes, filename: str, cc: Optional[str] = None) -> dict:
     msg = MIMEMultipart("mixed")
     msg["From"] = formataddr((EMAIL_FROM_NAME, SMTP_USER))
     msg["To"] = to
+    if cc:
+        msg["Cc"] = cc
     msg["Subject"] = subject
     if EMAIL_REPLY_TO:
         msg["Reply-To"] = EMAIL_REPLY_TO
@@ -208,12 +211,16 @@ def _send_smtp_sync(to: str, subject: str, html: str, pdf_bytes: bytes, filename
             server.starttls(context=context)
             server.ehlo()
         server.login(SMTP_USER, SMTP_APP_PASSWORD)
-        server.sendmail(SMTP_USER, [to], msg.as_string())
+        recipients = [to]
+        if cc and cc.casefold() != to.casefold():
+            recipients.append(cc)
+        # One MIME message / one SMTP send; CC is also an envelope recipient.
+        return server.sendmail(SMTP_USER, recipients, msg.as_string())
 
 
 def smtp_error_message(e: Exception) -> str:
     if isinstance(e, smtplib.SMTPAuthenticationError):
-        return "Gmail authentication failed — check SMTP_USER and SMTP_APP_PASSWORD (use a Gmail App Password, not your Gmail password)"
+        return "Gmail authentication failed — check the sender address and Gmail App Password in backend/.env"
     if isinstance(e, smtplib.SMTPServerDisconnected):
         return "SMTP server dropped the connection — check SMTP credentials and settings"
     if isinstance(e, smtplib.SMTPResponseException):
@@ -225,9 +232,9 @@ def smtp_error_message(e: Exception) -> str:
     return "Email delivery failed"
 
 
-async def send_smtp_email(to: str, subject: str, html: str, pdf_b64: str, filename: str) -> None:
-    pdf_bytes = base64.b64decode(pdf_b64)
-    await asyncio.to_thread(_send_smtp_sync, to, subject, html, pdf_bytes, filename)
+async def send_smtp_email(to: str, subject: str, html: str, pdf_b64: str, filename: str, cc: Optional[str] = None) -> dict:
+    pdf_bytes = base64.b64decode(pdf_b64, validate=True)
+    return await asyncio.to_thread(_send_smtp_sync, to, subject, html, pdf_bytes, filename, cc)
 
 
 @api_router.get("/")
@@ -237,36 +244,49 @@ async def root():
 
 @api_router.post("/email/invoice")
 async def email_invoice(payload: InvoiceEmailRequest):
+    invoice = (db.get_invoice(payload.invoiceId) if payload.invoiceId
+               else db.get_invoice_by_number(payload.invoiceNumber))
+    # Resolve recipients from the SAVED invoice, never from the mutable tenant table
+    # or the browser's current tenant selection. Keep the old request shape compatible.
+    owner = str(db.get_settings()["ownerEmail"]).strip()
+    cc = (invoice.get("tenantEmail") or "").strip() if invoice else ""
+    result = {"owner": "failed", "tenant": "failed" if cc else "no-email",
+              "errors": {}, "attachment": True, "to": owner, "cc": cc or None,
+              "at": datetime.now(timezone.utc).isoformat()}
     if not SMTP_CONFIGURED:
+        detail = "Gmail SMTP is not configured. Configure the sender address and Gmail App Password in backend/.env and restart the backend."
+        result["errors"]["owner"] = detail
+        if invoice:
+            db.save_invoice_email_status(invoice["id"], result)
         raise HTTPException(
             status_code=503,
-            detail="Gmail SMTP is not configured. Set SMTP_USER and SMTP_APP_PASSWORD in backend/.env and restart the backend.",
+            detail=detail,
         )
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Save the invoice before emailing it")
     if len(payload.pdfBase64) > 14_000_000:
         raise HTTPException(status_code=413, detail="PDF attachment too large")
-    filename = re.sub(r"[^A-Za-z0-9_.-]", "_", payload.pdfFilename) or "invoice.pdf"
-    if not filename.lower().endswith(".pdf"):
-        filename += ".pdf"
-    subject = re.sub(r"[\r\n]+", " ", f"PG Invoice {payload.invoiceNumber} - {payload.tenantName}")[:150]
-    body = invoice_email_html(payload)
-    result = {"owner": "failed", "tenant": "skipped", "errors": {}, "attachment": True}
     try:
-        await send_invoice_email(str(payload.ownerEmail), subject, body, payload.pdfBase64, filename)
-        result["owner"] = "sent"
+        # Validate trusted stored addresses as well (including older imported backups).
+        details = InvoiceEmailRequest(**{**payload.model_dump(), **{
+            k: invoice[k] for k in ("invoiceNumber", "tenantName", "billingMonth", "total", "amountPaid", "balanceDue", "paymentStatus")
+        }, "ownerEmail": owner, "tenantEmail": cc or None})
+        owner, cc = str(details.ownerEmail), str(details.tenantEmail) if details.tenantEmail else None
+        result.update(to=owner, cc=cc)
+        filename = "ShreeStayHomesPG_Invoice_" + re.sub(r"[^A-Za-z0-9_.-]", "_", invoice["invoiceNumber"]) + ".pdf"
+        subject = re.sub(r"[\r\n]+", " ", f"PG Invoice {invoice['invoiceNumber']} - {invoice['tenantName']}")[:150]
+        refused = await send_invoice_email(owner, subject, invoice_email_html(details), payload.pdfBase64, filename, cc)
+        refused = {address.casefold() for address in (refused or {})}
+        result["owner"] = "failed" if owner.casefold() in refused else "sent"
+        result["tenant"] = ("failed" if cc.casefold() in refused else "included") if cc else "no-email"
+        if result["owner"] == "failed":
+            result["errors"]["owner"] = "SMTP server refused the owner recipient — use Retry Email"
+        if result["tenant"] == "failed":
+            result["errors"]["tenant"] = "SMTP server refused the tenant CC recipient — use Retry Email"
     except Exception as e:
-        logger.error(f"Owner email failed: {type(e).__name__}")
+        logger.error("Invoice email failed: %s", type(e).__name__)
         result["errors"]["owner"] = smtp_error_message(e)
-    if payload.sendToTenant:
-        if payload.tenantEmail:
-            try:
-                await send_invoice_email(str(payload.tenantEmail), subject, body, payload.pdfBase64, filename)
-                result["tenant"] = "sent"
-            except Exception as e:
-                logger.error(f"Tenant email failed: {type(e).__name__}")
-                result["tenant"] = "failed"
-                result["errors"]["tenant"] = smtp_error_message(e)
-        else:
-            result["tenant"] = "no-email"
+    db.save_invoice_email_status(invoice["id"], result)
     return result
 
 
@@ -276,6 +296,9 @@ EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 
 
 class InvoiceIn(BaseModel):
+    tenantId: Optional[str] = None
+    paymentDate: Optional[str] = None
+    allowAdvance: bool = False
     tenantName: str
     tenantEmail: Optional[str] = ""
     tenantMobile: str = ""
@@ -302,6 +325,11 @@ class InvoiceIn(BaseModel):
     sendToTenant: bool = False
     emailStatus: Optional[dict] = None
     notes: str = ""
+
+    @field_validator("paymentDate")
+    @classmethod
+    def _payment_date_ok(cls, value):
+        return db.payment_store.valid_date(value) if value is not None else value
 
     @field_validator("tenantEmail")
     @classmethod
@@ -341,7 +369,19 @@ async def api_list_invoices(q: Optional[str] = None, month: Optional[str] = None
 
 @api_router.post("/invoices", status_code=201)
 async def api_create_invoice(payload: InvoiceIn):
-    return db.create_invoice(payload.model_dump())
+    data = payload.model_dump()
+    if payload.tenantId:
+        tenant = db.get_tenant(payload.tenantId)
+        if not tenant:
+            raise HTTPException(status_code=404, detail="Selected tenant no longer exists")
+        if (payload.tenantName.strip() != (tenant.get("name") or "").strip()
+                or payload.tenantMobile.strip() != (tenant.get("mobile") or "").strip()):
+            raise HTTPException(status_code=422, detail="Tenant selection changed. Select the tenant again.")
+        data["tenantEmail"] = (tenant.get("email") or "").strip()
+    try:
+        return db.create_invoice(data)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
 
 
 @api_router.get("/invoices/overdue")
@@ -359,7 +399,10 @@ async def api_get_invoice(inv_id: str):
 
 @api_router.put("/invoices/{inv_id}")
 async def api_update_invoice(inv_id: str, payload: InvoiceIn):
-    inv = db.update_invoice(inv_id, payload.model_dump())
+    try:
+        inv = db.update_invoice(inv_id, payload.model_dump(exclude_unset=True))
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
     if not inv:
         raise HTTPException(status_code=404, detail="Invoice not found")
     return inv
@@ -667,6 +710,8 @@ async def api_imports():
 
 
 app.include_router(api_router)
+from payment_routes import router as payment_router
+app.include_router(payment_router)
 
 app.add_middleware(
     CORSMiddleware,
