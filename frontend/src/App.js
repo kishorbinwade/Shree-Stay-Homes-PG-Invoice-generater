@@ -16,6 +16,7 @@ import Reports from "@/pages/Reports";
 import ImportCSV from "@/pages/ImportCSV";
 import RoomsBeds from "@/pages/RoomsBeds";
 import Payments from "@/pages/Payments";
+import TenantLedger from "@/pages/TenantLedger";
 import { Toaster } from "@/components/ui/sonner";
 
 function App() {
@@ -38,6 +39,7 @@ function App() {
             <Route path="/rooms" element={<RoomsBeds />} />
             <Route path="/payments" element={<Payments />} />
             <Route path="/tenants" element={<Tenants />} />
+            <Route path="/tenants/:id/ledger" element={<TenantLedger />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/backup" element={<Backup />} />
             <Route path="*" element={<Navigate to="/dashboard" replace />} />

@@ -323,3 +323,37 @@ def test_backup_includes_new_modules():
     assert len(backup["foodOrders"]) >= 3
     res = client.post("/api/backup/import?mode=merge", json=backup).json()
     assert res["food_orders_added"] == 0  # merge skips existing ids
+
+
+def test_tenant_ledger_running_balance():
+    base = {"tenantName": "Ledger Tenant", "tenantMobile": "9123456780", "roomNumber": "L1", "bedNumber": "A"}
+    client.post("/api/invoices", json={**base, "billingMonth": "2026-01", "invoiceDate": "2026-01-05",
+                                       "rent": 5000, "amountPaid": 3000, "paymentMode": "UPI"})
+    client.post("/api/invoices", json={**base, "billingMonth": "2026-02", "invoiceDate": "2026-02-05",
+                                       "rent": 5000, "previousBalance": 2000, "amountPaid": 7000, "paymentMode": "Cash"})
+    client.post("/api/invoices", json={**base, "billingMonth": "2026-03", "invoiceDate": "2026-03-05",
+                                       "rent": 5000, "electricity": 300, "amountPaid": 0})
+    r = client.get("/api/tenants/9123456780/ledger")
+    assert r.status_code == 200
+    led = r.json()
+    assert led["tenant"]["name"] == "Ledger Tenant"
+    assert led["summary"]["invoiceCount"] == 3
+    # previous balance is excluded from charges so nothing is double counted
+    assert led["summary"]["totalBilled"] == 15300
+    assert led["summary"]["totalPaid"] == 10000
+    assert led["summary"]["outstanding"] == 5300
+    types = [row["type"] for row in led["rows"]]
+    assert types == ["invoice", "payment", "invoice", "payment", "invoice"]
+    assert [row["balance"] for row in led["rows"]] == [5000, 2000, 7000, 0, 5300]
+    assert led["rows"][2]["debit"] == 5000 and led["rows"][2]["invoiceTotal"] == 7000
+    assert led["rows"][1]["paymentMode"] == "UPI"
+
+
+def test_tenant_ledger_opening_balance_and_404():
+    r = client.post("/api/invoices", json={"tenantName": "Opening Tenant", "tenantMobile": "9123456781",
+                                           "billingMonth": "2026-04", "rent": 4000, "previousBalance": 1500, "amountPaid": 0})
+    assert r.status_code == 201
+    led = client.get("/api/tenants/9123456781/ledger").json()
+    assert led["rows"][0]["type"] == "opening" and led["rows"][0]["debit"] == 1500
+    assert led["summary"]["totalBilled"] == 5500 and led["summary"]["outstanding"] == 5500
+    assert client.get("/api/tenants/0000000000/ledger").status_code == 404

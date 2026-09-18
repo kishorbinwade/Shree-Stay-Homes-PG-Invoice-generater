@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { toast } from 'sonner';
-import { Users, FilePlus2, Trash2, Search } from 'lucide-react';
+import { Users, FilePlus2, Trash2, Search, BookOpen } from 'lucide-react';
 import { fetchTenants, fetchInvoices, removeTenant } from '../lib/api';
 import { inr, fmtDate } from '../lib/format';
 import { Button } from '../components/ui/button';
@@ -104,7 +104,7 @@ export default function Tenants() {
                   return (
                     <tr key={t.id} className="border-b border-stone-100 transition-colors duration-150 hover:bg-stone-50" data-testid={`tenant-row-${t.id}`}>
                       <td className="px-4 py-3">
-                        <div className="font-semibold text-stone-900">{t.name}</div>
+                        <Link to={`/tenants/${encodeURIComponent(t.id)}/ledger`} className="font-semibold text-stone-900 hover:text-terracotta-600" data-testid={`tenant-name-link-${t.id}`}>{t.name}</Link>
                         {t.occupation && <div className="text-xs text-stone-500">{t.occupation}</div>}
                       </td>
                       <td className="px-4 py-3 text-stone-600">{t.mobile || '-'}</td>
@@ -115,6 +115,9 @@ export default function Tenants() {
                       <td className="px-4 py-3 text-stone-600">{agg.lastDate ? fmtDate(agg.lastDate) : '-'}</td>
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-end gap-1">
+                          <Button variant="ghost" size="icon" title="View ledger" onClick={() => navigate(`/tenants/${encodeURIComponent(t.id)}/ledger`)} data-testid={`tenant-ledger-${t.id}`}>
+                            <BookOpen className="h-4 w-4 text-terracotta-600" />
+                          </Button>
                           <Button variant="ghost" size="icon" title="New invoice for tenant" onClick={() => navigate(`/invoices/new?tenant=${t.id}`)} data-testid={`tenant-new-invoice-${t.id}`}>
                             <FilePlus2 className="h-4 w-4 text-stone-500" />
                           </Button>

@@ -64,6 +64,7 @@ export const peekNextNumber = () => req('/invoices/next-number');
 // ---------- tenants ----------
 export const fetchTenants = () => req('/tenants');
 export const fetchTenant = (id) => req(`/tenants/${encodeURIComponent(id)}`);
+export const fetchTenantLedger = (id) => req(`/tenants/${encodeURIComponent(id)}/ledger`);
 export const removeTenant = (id) => req(`/tenants/${encodeURIComponent(id)}`, { method: 'DELETE' });
 
 // ---------- settings ----------

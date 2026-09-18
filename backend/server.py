@@ -593,6 +593,14 @@ async def api_food_summary(month: Optional[str] = None):
     return db.food_summary(month or datetime.now().date().isoformat()[:7])
 
 
+@api_router.get("/tenants/{tid}/ledger")
+async def api_tenant_ledger(tid: str):
+    ledger = db.tenant_ledger(tid)
+    if not ledger:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    return ledger
+
+
 @api_router.put("/tenants/{tid}")
 async def api_update_tenant(tid: str, payload: TenantUpdate):
     t = db.update_tenant(tid, payload.model_dump(exclude_none=True))

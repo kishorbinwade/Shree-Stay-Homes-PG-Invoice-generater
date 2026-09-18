@@ -881,6 +881,55 @@ def food_month_total_for_tenant(month: str, name: str, mobile: str) -> float:
 
 # ---------- monthly billing ----------
 
+def tenant_ledger(tid: str):
+    tenant = get_tenant(tid)
+    invs = [i for i in list_invoices(order="asc")
+            if _tenant_key(i.get("tenantName"), i.get("tenantMobile")) == tid]
+    if not tenant and not invs:
+        return None
+    invs.sort(key=lambda i: ((i.get("invoiceDate") or ""), (i.get("createdAt") or "")))
+    if not tenant:
+        last = invs[-1]
+        tenant = {"id": tid, "name": last.get("tenantName"), "mobile": last.get("tenantMobile"),
+                  "email": last.get("tenantEmail"), "roomNumber": last.get("roomNumber"),
+                  "bedNumber": last.get("bedNumber"), "deleted": True}
+    rows, balance, billed, paid = [], 0.0, 0.0, 0.0
+    for idx, inv in enumerate(invs):
+        date = inv.get("invoiceDate") or (inv.get("createdAt") or "")[:10]
+        prev = float(inv.get("previousBalance") or 0)
+        total = float(inv.get("total") or 0)
+        if idx == 0 and prev > 0:
+            balance += prev
+            billed += prev
+            rows.append({"date": date, "type": "opening", "invoiceId": inv["id"],
+                         "invoiceNumber": inv["invoiceNumber"], "billingMonth": inv.get("billingMonth"),
+                         "description": "Opening balance (carried forward)", "debit": round(prev, 2),
+                         "credit": 0, "balance": round(balance, 2)})
+        charge = round(max(total - prev, 0.0), 2)
+        balance += charge
+        billed += charge
+        rows.append({"date": date, "type": "invoice", "invoiceId": inv["id"],
+                     "invoiceNumber": inv["invoiceNumber"], "billingMonth": inv.get("billingMonth"),
+                     "description": f"Invoice for {inv.get('billingMonth') or ''}".strip(),
+                     "debit": charge, "credit": 0, "balance": round(balance, 2),
+                     "previousBalance": round(prev, 2), "invoiceTotal": round(total, 2)})
+        amt = float(inv.get("amountPaid") or 0)
+        if amt > 0:
+            balance -= amt
+            paid += amt
+            rows.append({"date": date, "type": "payment", "invoiceId": inv["id"],
+                         "invoiceNumber": inv["invoiceNumber"], "billingMonth": inv.get("billingMonth"),
+                         "description": f"Payment ({inv.get('paymentMode') or 'Cash'})",
+                         "paymentMode": inv.get("paymentMode"), "transactionId": inv.get("transactionId"),
+                         "debit": 0, "credit": round(amt, 2), "balance": round(balance, 2)})
+    return {
+        "tenant": tenant,
+        "rows": rows,
+        "summary": {"totalBilled": round(billed, 2), "totalPaid": round(paid, 2),
+                    "outstanding": round(billed - paid, 2), "invoiceCount": len(invs)},
+    }
+
+
 def _previous_balance_for_tenant(month: str, name: str, mobile: str) -> float:
     key = _tenant_key(name, mobile)
     total = 0.0

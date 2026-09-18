@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import { useSettings } from '../context/SettingsContext';
 import {
-  fetchInvoice, fetchTenant, createInvoice as apiCreateInvoice,
+  fetchInvoice, fetchTenant, fetchTenants, createInvoice as apiCreateInvoice,
   updateInvoice as apiUpdateInvoice, peekNextNumber,
 } from '../lib/api';
 import { buildInvoicePDF, downloadPDF, printPDF } from '../lib/pdf';
@@ -20,6 +20,7 @@ import { Checkbox } from '../components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import InvoicePreview from '../components/InvoicePreview';
+import { TenantNameInput } from '../components/TenantNameInput';
 
 const EMPTY = {
   tenantName: '', tenantEmail: '', tenantMobile: '', roomNumber: '', bedNumber: '',
@@ -59,6 +60,21 @@ export default function CreateInvoice() {
   const [nextNumber, setNextNumber] = useState('');
   const [previewOpen, setPreviewOpen] = useState(false);
   const [editId, setEditId] = useState(null);
+  const [tenants, setTenants] = useState([]);
+
+  useEffect(() => {
+    if (!id) fetchTenants().then(setTenants).catch(() => {});
+  }, [id]);
+
+  const applyTenant = (t) => {
+    setForm((f) => ({
+      ...f, tenantName: t.name || '', tenantEmail: t.email || '', tenantMobile: t.mobile || '',
+      roomNumber: t.roomNumber || '', bedNumber: t.bedNumber || '', occupation: t.occupation || '',
+      emergencyContact: t.emergencyContact || '', checkIn: t.checkIn || '', checkOut: t.checkOut || '',
+    }));
+    setErrors((er) => ({ ...er, tenantName: undefined, tenantMobile: undefined, tenantEmail: undefined }));
+    toast.success(`Filled details for ${t.name}`);
+  };
 
   useEffect(() => {
     peekNextNumber().then((d) => setNextNumber(d.nextNumber)).catch(() => {});
@@ -288,7 +304,11 @@ export default function CreateInvoice() {
             <h2 className="font-heading text-lg font-bold text-stone-900">Tenant Details</h2>
             <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field label="Tenant / Guest Name" required error={errors.tenantName} testId="tenant-name">
-                <Input value={form.tenantName} onChange={set('tenantName')} placeholder="e.g. Rahul Sharma" data-testid="tenant-name" className={inputCls} />
+                {id ? (
+                  <Input value={form.tenantName} onChange={set('tenantName')} placeholder="e.g. Rahul Sharma" data-testid="tenant-name" className={inputCls} />
+                ) : (
+                  <TenantNameInput value={form.tenantName} onChange={set('tenantName')} onSelect={applyTenant} tenants={tenants} placeholder="Type to search existing tenants or enter a new name" data-testid="tenant-name" className={inputCls} />
+                )}
               </Field>
               <Field label="Tenant Mobile" required error={errors.tenantMobile} testId="tenant-mobile">
                 <Input value={form.tenantMobile} onChange={set('tenantMobile')} placeholder="10-digit mobile" maxLength={10} data-testid="tenant-mobile" className={inputCls} />
