@@ -121,6 +121,15 @@
 ##         -working: true
 ##         -agent: "testing"
 ##         -comment: "Backend baseline verification complete. Supervisor status: RUNNING (pid 1343, uptime 0:12:20). Hermetic test suite: 24/24 tests PASSED in 7.59s using temporary database (no live data touched). Live API verification: 10/10 endpoints PASSED including GET /api/ (health), /settings, /invoices/next-number, /dashboard/stats, and all list endpoints. Live database initialized and empty (0 invoices, 0 tenants). All baseline functionality working correctly."
+##         -working: false
+##         -agent: "user"
+##         -comment: "User reported the frontend offline banner: Cannot reach the local backend (http://localhost:8001)."
+##         -working: true
+##         -agent: "main"
+##         -comment: "Inspected supervisor and logs; backend was RUNNING and serving 200 responses. Verified the preview after service recovery: settings API returned 200 and the backend-offline banner was absent. No code or data changes were made."
+##         -working: true
+##         -agent: "testing"
+##         -comment: "Backend connectivity verification complete. Supervisor status: RUNNING (pid 1343, uptime 0:18:38). Backend logs show successful API responses (200 OK) for all endpoints including /api/settings, /api/dashboard/stats, /api/invoices, /api/tenants, etc. Settings API successfully fetched with status 200 and correct data (businessName: SHREE STAY HOMES & PG). Backend is fully operational and reachable from frontend."
 ## frontend:
 ##   - task: "Local frontend startup and preview"
 ##     implemented: true
@@ -139,10 +148,13 @@
 ##         -working: true
 ##         -agent: "testing"
 ##         -comment: "Frontend preview fully functional. Comprehensive UI testing completed (1920x800 viewport): ✅ Root URL (/) correctly redirects to /dashboard. ✅ Dashboard renders with proper branding 'SHREE STAY HOMES & PG' and subtitle. ✅ All 14 navigation items present and accessible. ✅ All 13 routes tested successfully (Create Invoice, History, Tenants, Settings, Backup, Monthly Billing, Food Orders, Expenses, Reports, Import Google Forms, Rooms & Beds, Payments, Overdue). ✅ No backend offline banner (backend is reachable). ✅ No network failures detected. ✅ No page errors or broken routes. Minor: 4 console warnings about chart dimensions (recharts library with empty data - cosmetic only, does not affect functionality). Dashboard shows proper empty state with metrics at ₹0.00 and 'No invoices yet' message. Screenshot captured. All core functionality working correctly."
+##         -working: true
+##         -agent: "testing"
+##         -comment: "Non-destructive verification completed at http://localhost:3000/dashboard (1920x800 viewport). ✅ Dashboard visible with correct branding after page load and reload. ✅ backend-offline-banner element is ABSENT (verified before and after reload). ✅ Settings API successfully fetched (status 200, businessName: SHREE STAY HOMES & PG). ✅ No page errors or network failures detected. ✅ All network requests successful. Minor: 4 console warnings from recharts library about chart dimensions (cosmetic, non-blocking, same as previously noted). User-reported issue 'Cannot reach the local backend' is RESOLVED. Frontend-backend connectivity fully operational."
 ## metadata:
 ##   created_by: "main_agent"
 ##   version: "1.0"
-##   test_sequence: 9
+##   test_sequence: 10
 ##   run_ui: true
 ## test_plan:
 ##   current_focus:
@@ -157,3 +169,5 @@
 ##     -message: "Backend baseline testing completed successfully. All 24 hermetic tests passed (using temporary DB, no live data touched). All 10 live API endpoints verified working. Live database initialized correctly with 0 records. Backend is fully operational and ready for use. Frontend testing was not performed as per instructions (UI testing requires user approval)."
 ##     -agent: "testing"
 ##     -message: "Frontend UI testing completed successfully. Non-destructive verification performed at http://localhost:3000 with 1920x800 viewport. All navigation routes working (13/13 tested). Dashboard renders correctly with branding, metrics, and empty state. Backend integration confirmed (no offline banner). Only minor console warnings from chart library with empty data (cosmetic, non-blocking). Application is fully functional and ready for use. No code changes were made during testing."
+##     -agent: "testing"
+##     -message: "User-reported issue verification complete. Non-destructive testing at http://localhost:3000/dashboard (1920x800 viewport) confirms: ✅ Dashboard loads correctly with proper branding. ✅ backend-offline-banner element is absent (verified before and after page reload). ✅ Settings API successfully fetched (200 OK). ✅ No page errors or network failures. ✅ Backend connectivity fully operational (supervisor: backend RUNNING pid 1343, frontend RUNNING pid 4452, mongodb RUNNING pid 57). User-reported issue 'Cannot reach the local backend' is RESOLVED. Only minor console warnings from recharts library (cosmetic, non-blocking). No code or data changes made during verification."
