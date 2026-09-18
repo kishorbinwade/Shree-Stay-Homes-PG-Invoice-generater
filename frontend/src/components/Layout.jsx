@@ -3,10 +3,10 @@ import { NavLink, Outlet, Link } from 'react-router-dom';
 import {
   LayoutDashboard, FilePlus2, History, Users, Settings as SettingsIcon,
   DatabaseBackup, Menu, WifiOff, BedDouble, CalendarPlus, IndianRupee,
-  AlarmClock, UtensilsCrossed, Wallet, BarChart3, FileUp,
+  AlarmClock, UtensilsCrossed, Wallet, BarChart3, FileUp, RefreshCw, Loader2,
 } from 'lucide-react';
 import { useSettings } from '../context/SettingsContext';
-import { IS_LOCAL } from '../lib/api';
+import { BACKEND_CONNECTION_ERROR } from '../lib/api';
 import { Sheet, SheetContent, SheetTrigger } from './ui/sheet';
 import { Button } from './ui/button';
 
@@ -90,7 +90,7 @@ function OfflineIndicator() {
 }
 
 export default function Layout() {
-  const { settings, backendDown } = useSettings();
+  const { settings, loaded, backendDown, checkingBackend, retryBackend } = useSettings();
   const [open, setOpen] = useState(false);
 
   return (
@@ -119,15 +119,24 @@ export default function Layout() {
       </div>
 
       {backendDown && (
-        <div data-testid="backend-offline-banner" className="border-b border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700 lg:pl-64">
-          {IS_LOCAL
-            ? 'Cannot reach the backend at http://localhost:8001. Start it with ./scripts/run-local.sh — invoices, history and settings need it running.'
-            : 'Cannot reach the backend right now. Retrying automatically…'}
+        <div data-testid="backend-offline-banner" role="alert" className="border-b border-red-200 bg-red-50 text-sm text-red-700 lg:pl-64">
+          <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-4 py-2.5 sm:px-6 lg:px-8">
+            <span className="min-w-0 flex-1 break-words" data-testid="backend-offline-message">{BACKEND_CONNECTION_ERROR}</span>
+            <Button variant="outline" size="sm" disabled={checkingBackend} onClick={retryBackend} data-testid="backend-retry-button">
+              <RefreshCw className={`mr-2 h-3.5 w-3.5 ${checkingBackend ? 'animate-spin' : ''}`} />
+              {checkingBackend ? 'Connecting…' : 'Retry now'}
+            </Button>
+          </div>
         </div>
       )}
       <main className="lg:pl-64">
         <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
-          <Outlet />
+          {loaded ? <Outlet /> : (
+            <div role="status" data-testid="backend-connecting-state" className="flex items-center gap-3 py-12 text-sm text-stone-600">
+              <Loader2 className="h-5 w-5 shrink-0 animate-spin text-terracotta-500" />
+              {backendDown ? 'Waiting for the backend connection…' : 'Loading your billing data…'}
+            </div>
+          )}
         </div>
       </main>
       <OfflineIndicator />

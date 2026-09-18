@@ -4,6 +4,7 @@
 Production-ready PG Billing & Invoice Generator for "SHREE STAY HOMES & PG" (PG Accommodation & Stay Services). Fully functional app: create invoices, auto-calculate billing, generate secure watermarked A4 PDFs, download/print, store records locally on the owner's device (IndexedDB, no cloud DB), email invoices to owner (default shreehomestaypg@gmail.com) and optionally tenant, invoice history, dashboard stats, backup/restore (JSON/CSV), settings (branding, logo/signature upload, invoice numbering, watermark), offline-first PWA, validation, INR formatting, sequential invoice numbers (SHPG-YYYY-NNNN).
 
 ## User Choices
+- Latest instruction (2026-09-18): this is a personal, single-user localhost application. Keep checks lightweight and focused on local startup and basic use; do not undertake professional/hosting-readiness testing or add multi-user/hosting features. Do not pull or push code without permission.
 - Email: Resend (Emergent-managed proxy, no user API key) via FastAPI backend `POST /api/email/invoice` with base64 PDF attachment.
 - Logo/Signature: owner uploads own images in Settings (FileReader → dataURL → IndexedDB).
 - Stack defaults: React + FastAPI + IndexedDB (idb) + jsPDF, offline-first PWA.
@@ -79,3 +80,22 @@ Production-ready PG Billing & Invoice Generator for "SHREE STAY HOMES & PG" (PG 
 - Backend URL now auto-resolves in `frontend/src/lib/api.js` via `resolveBackend()`: hostname localhost/127.0.0.1 → `http://localhost:8001`; anything else → `REACT_APP_BACKEND_URL`. Exported `IS_LOCAL`. Same code works in both places regardless of which `.env` is present. Error message + Layout banner made dynamic (no more misleading hardcoded localhost text on the preview).
 - SettingsContext now retries fetchSettings up to 3× (1.5s apart) before flagging backendDown → no false-alarm banner on slow first load.
 - Bundled sample data: `backend/seed_data.json` (5 invoices, 2 tenants, 4 expenses, 4 food orders — expenses/food dated current month). `database.seed_if_empty()` imports it only when the DB has zero invoices AND zero tenants (idempotent, never overwrites real data). Called on server startup in `server.py`. Ensures a freshly-pulled local copy (DB is gitignored) is never blank. Verified on fresh temp DB + live preview (Dashboard, Expenses render).
+
+## 2026-09-18 — Connection recovery and Node/Yarn check
+- User reported screenshot/preview mismatch, authorised a fix, then asked to check Yarn cache/Node. Final scope clarification: single owner using localhost only; no hosting checks or extensive testing.
+- Reproduced a concrete failure: after three settings requests failed, an already-open page permanently displayed the offline banner and empty dashboard, even when the API recovered and returned five invoices. Settings retries previously stopped despite the banner claiming automatic retry; dashboard failures were silently treated as empty records.
+- Updated `SettingsContext.jsx`: bounded initial grace period followed by continuing five-second retry; resume on focus/online/visibility; manual Retry now; cleanup on unmount. `loaded` now means settings actually loaded successfully.
+- Updated `Layout.jsx`: hold initial page queries until settings are available, show a truthful connecting state and retry button, preserve mounted pages after initial connection. Existing desktop/mobile design preserved.
+- Added `hooks/useDashboardData.js`: dashboard invoices/stats load together, failures show an explicit error rather than a false empty state, automatic read retry plus manual retry. Updated Dashboard to use the hook.
+- Updated `lib/api.js`: ten-second timeout for GET requests and no-store read caching. Writes are not retried. Existing localhost/preview URL resolution retained. No database, seed, authentication, environment values, dependencies or lockfiles were changed by this work.
+- Lightweight verification: reproduced failure before changes; automatic recovery without page reload passed after changes; mobile dashboard-only failure and manual retry passed; overflow checks empty at 1920×800 and 390×844. APIs use actual SQLite sample data, not mocked integrations. No fresh dummy records were added.
+- Node v20.20.2 is compatible with installed React/CRACO/webpack packages; Yarn 1.22.22 integrity check passed, previously missing modules resolve, cache listing succeeded (cache is empty, not corrupted). Historical logs contain `craco: not found` and missing Lodash/Babel module errors, but current runtime/build no longer reproduce them. No reinstall or cache deletion needed.
+- `yarn build` passed with three pre-existing React Hook dependency warnings (Expenses, FoodOrders, Reports). Local startup script is executable and `bash -n scripts/run-local.sh` passed. Build/cache logs preserved under `/app/test_reports/preview_recovery/`. These are workspace checks, not a claim of testing the user's own computer.
+- Preview environment address changed during the user pause. First post-change recovery run accidentally used the earlier address and failed CORS against the newly configured address; repeating against the CURRENT frontend/.env URL passed. Always re-read this environment variable after a pause/fork; do not hardcode previous screenshot URLs.
+- No testing subagent/hosting-readiness review was run for this incremental work. Honour the user's preference for minimal local-use checks going forward.
+
+### Current scope and next actions
+- Current architecture supersedes early historical sections above: React 19 + FastAPI + local SQLite; no authentication, single owner. Gmail SMTP remains optional and unconfigured in this environment, so actual email delivery is unavailable until configured.
+- P0: no reproduced blocker remains; await the owner's localhost verification. Investigate their exact terminal error if local startup fails rather than broad refactoring or dependency upgrades.
+- P1: pre-existing non-blocking Hook/chart warnings and PDF edge-case checks are deferred unless requested.
+- P2: yearly invoice reset UI, GST %, WhatsApp PDF sharing, print stylesheet, ledger export/filter remain deferred. Suggested small future improvement: local backup reminder.

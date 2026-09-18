@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { FileText, IndianRupee, Wallet, Clock3, FilePlus2, ArrowRight, BedDouble, AlarmClock, UtensilsCrossed, TrendingUp } from 'lucide-react';
+import { FileText, IndianRupee, Wallet, Clock3, FilePlus2, ArrowRight, BedDouble, AlarmClock, UtensilsCrossed, TrendingUp, RefreshCw } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
-import { fetchInvoices, fetchDashboardStats } from '../lib/api';
+import { useDashboardData } from '../hooks/useDashboardData';
 import { inr, currentMonth, monthLabel, fmtDate } from '../lib/format';
 import { Button } from '../components/ui/button';
 
@@ -37,17 +37,7 @@ function StatusBadge({ status }) {
 }
 
 export default function Dashboard() {
-  const [invoices, setInvoices] = useState([]);
-  const [stats, setStats] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    fetchInvoices()
-      .then(setInvoices)
-      .catch(() => {})
-      .finally(() => setLoading(false));
-    fetchDashboardStats().then(setStats).catch(() => {});
-  }, []);
+  const { invoices, stats, loading, error, retry } = useDashboardData();
 
   const chartData = useMemo(() => {
     const months = [];
@@ -82,6 +72,16 @@ export default function Dashboard() {
           </Link>
         </Button>
       </div>
+
+      {error && (
+        <div role="alert" data-testid="dashboard-load-error" className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+          <span className="min-w-0 flex-1 break-words" data-testid="dashboard-load-error-message">Billing data could not be loaded. Retrying automatically. {error}</span>
+          <Button variant="outline" size="sm" onClick={retry} disabled={loading} data-testid="dashboard-retry-button">
+            <RefreshCw className={`mr-2 h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+            {loading ? 'Loading…' : 'Retry now'}
+          </Button>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-4">
         <StatCard icon={FileText} label="Total Invoices" value={stats?.totalInvoices ?? '—'} delay={0} testId="stat-total-invoices" />
@@ -124,6 +124,8 @@ export default function Dashboard() {
           </div>
           {loading ? (
             <div className="py-16 text-center text-sm text-stone-400" data-testid="dashboard-loading">Loading…</div>
+          ) : error && recent.length === 0 ? (
+            <div className="py-16 text-center text-sm text-stone-500" data-testid="dashboard-unavailable-state">Invoice records are temporarily unavailable.</div>
           ) : recent.length === 0 ? (
             <div className="flex flex-col items-center py-16 text-center" data-testid="dashboard-empty-state">
               <FileText className="h-12 w-12 text-stone-300" />

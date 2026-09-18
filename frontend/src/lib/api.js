@@ -16,6 +16,9 @@ function resolveBackend() {
 const BACKEND = resolveBackend();
 const API = `${BACKEND}/api`;
 export const IS_LOCAL = BACKEND === 'http://localhost:8001';
+export const BACKEND_CONNECTION_ERROR = IS_LOCAL
+  ? `Cannot reach the backend at ${BACKEND}. Start it with ./scripts/run-local.sh — invoices, history and settings need it running.`
+  : 'Cannot reach the backend right now. Retrying automatically…';
 
 export const DEFAULT_SETTINGS = {
   businessName: 'SHREE STAY HOMES & PG',
@@ -38,16 +41,21 @@ export const DEFAULT_SETTINGS = {
 
 async function req(path, options = {}) {
   let res;
+  const isRead = !options.method || options.method.toUpperCase() === 'GET';
+  const controller = new AbortController();
+  // Bound reads so a stalled connection cannot leave the preview loading forever.
+  // Never automatically retry writes: an interrupted save may have already committed.
+  const timeout = isRead ? setTimeout(() => controller.abort(), 10000) : null;
   try {
     res = await fetch(`${API}${path}`, {
       headers: { 'Content-Type': 'application/json' },
       ...options,
+      ...(isRead ? { cache: 'no-store', signal: controller.signal } : {}),
     });
   } catch (e) {
-    const msg = IS_LOCAL
-      ? 'Cannot reach the backend at http://localhost:8001. Start it with ./scripts/run-local.sh — invoices, history and settings need it running.'
-      : `Cannot reach the backend at ${BACKEND}. Please retry in a moment.`;
-    throw new Error(msg);
+    throw new Error(IS_LOCAL ? BACKEND_CONNECTION_ERROR : `Cannot reach the backend at ${BACKEND}. Please retry in a moment.`);
+  } finally {
+    if (timeout) clearTimeout(timeout);
   }
   if (!res.ok) {
     let detail = `Request failed (${res.status})`;
