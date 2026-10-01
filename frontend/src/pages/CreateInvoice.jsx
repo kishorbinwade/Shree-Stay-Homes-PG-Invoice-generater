@@ -79,6 +79,8 @@ export default function CreateInvoice() {
       ...f, tenantName: t.name || '', tenantEmail: t.email || '', tenantMobile: t.mobile || '',
       roomNumber: t.roomNumber || '', bedNumber: t.bedNumber || '', occupation: t.occupation || '',
       emergencyContact: t.emergencyContact || '', checkIn: t.checkIn || '', checkOut: t.checkOut || '',
+      rent: t.rent != null && t.rent !== '' ? String(t.rent) : f.rent,
+      securityDeposit: t.deposit != null && t.deposit !== '' ? String(t.deposit) : f.securityDeposit,
     }));
     setErrors((er) => ({ ...er, tenantName: undefined, tenantMobile: undefined, tenantEmail: undefined }));
     toast.success(`Filled details for ${t.name}`);
@@ -127,6 +129,8 @@ export default function CreateInvoice() {
             ...f, tenantName: t.name || '', tenantEmail: t.email || '', tenantMobile: t.mobile || '',
             roomNumber: t.roomNumber || '', bedNumber: t.bedNumber || '', occupation: t.occupation || '',
             emergencyContact: t.emergencyContact || '', checkIn: t.checkIn || '', checkOut: t.checkOut || '',
+            rent: t.rent != null && t.rent !== '' ? String(t.rent) : f.rent,
+            securityDeposit: t.deposit != null && t.deposit !== '' ? String(t.deposit) : f.securityDeposit,
           }));
         }
       }

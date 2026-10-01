@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { toast } from 'sonner';
-import { Users, FilePlus2, Trash2, Search, BookOpen } from 'lucide-react';
-import { fetchTenants, fetchInvoices, removeTenant } from '../lib/api';
-import { inr, fmtDate } from '../lib/format';
+import { Users, FilePlus2, Trash2, Search, BookOpen, Pencil, Loader2 } from 'lucide-react';
+import { fetchTenants, fetchInvoices, removeTenant, updateTenant } from '../lib/api';
+import { inr, fmtDate, num } from '../lib/format';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
+import { Label } from '../components/ui/label';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -18,6 +20,10 @@ export default function Tenants() {
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState('');
   const [pendingDelete, setPendingDelete] = useState(null);
+  const [editing, setEditing] = useState(null);
+  const [editForm, setEditForm] = useState({});
+  const [editErrors, setEditErrors] = useState({});
+  const [savingEdit, setSavingEdit] = useState(false);
 
   const reload = () =>
     Promise.all([fetchTenants(), fetchInvoices()])
@@ -54,6 +60,58 @@ export default function Tenants() {
     toast.success(`Tenant ${pendingDelete.name} removed (invoices are kept)`);
     setPendingDelete(null);
     reload();
+  };
+
+  const EDIT_FIELDS = [
+    ['name', 'Name', 'text'], ['mobile', 'Mobile', 'text'], ['email', 'Email', 'email'],
+    ['occupation', 'Occupation', 'text'], ['emergencyContact', 'Emergency Contact', 'text'],
+    ['roomNumber', 'Room Number', 'text'], ['bedNumber', 'Bed Number', 'text'],
+    ['rent', 'Monthly Rent (₹)', 'number'], ['deposit', 'Security Deposit (₹)', 'number'],
+    ['checkIn', 'Check-in Date', 'date'], ['checkOut', 'Check-out Date', 'date'],
+  ];
+
+  const openEdit = (t) => {
+    setEditing(t);
+    setEditErrors({});
+    setEditForm({
+      name: t.name || '', mobile: t.mobile || '', email: t.email || '',
+      occupation: t.occupation || '', emergencyContact: t.emergencyContact || '',
+      roomNumber: t.roomNumber || '', bedNumber: t.bedNumber || '',
+      rent: t.rent ?? '', deposit: t.deposit ?? '',
+      checkIn: t.checkIn || '', checkOut: t.checkOut || '',
+    });
+  };
+
+  const setEditField = (k) => (e) => {
+    setEditForm((f) => ({ ...f, [k]: e.target.value }));
+    setEditErrors((er) => ({ ...er, [k]: undefined }));
+  };
+
+  const handleEditSave = async () => {
+    const e = {};
+    if (!editForm.name.trim()) e.name = 'Name is required';
+    if (editForm.mobile && !/^[6-9]\d{9}$/.test(editForm.mobile.trim())) e.mobile = 'Enter a valid 10-digit mobile number';
+    if (editForm.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(editForm.email.trim())) e.email = 'Enter a valid email address';
+    if (num(editForm.rent) < 0) e.rent = 'Amount cannot be negative';
+    if (num(editForm.deposit) < 0) e.deposit = 'Amount cannot be negative';
+    if (editForm.checkIn && editForm.checkOut && editForm.checkOut < editForm.checkIn) e.checkOut = 'Check-out cannot be before check-in';
+    setEditErrors(e);
+    if (Object.values(e).some(Boolean)) return;
+    setSavingEdit(true);
+    try {
+      await updateTenant(editing.id, {
+        ...editForm,
+        name: editForm.name.trim(), mobile: editForm.mobile.trim(), email: editForm.email.trim(),
+        rent: num(editForm.rent), deposit: num(editForm.deposit),
+      });
+      toast.success(`${editForm.name.trim()} updated — new details will auto-fill on the next invoice`);
+      setEditing(null);
+      reload();
+    } catch (err) {
+      toast.error(err.message || 'Failed to update tenant');
+    } finally {
+      setSavingEdit(false);
+    }
   };
 
   return (
@@ -118,6 +176,9 @@ export default function Tenants() {
                           <Button variant="ghost" size="icon" title="View ledger" onClick={() => navigate(`/tenants/${encodeURIComponent(t.id)}/ledger`)} data-testid={`tenant-ledger-${t.id}`}>
                             <BookOpen className="h-4 w-4 text-terracotta-600" />
                           </Button>
+                          <Button variant="ghost" size="icon" title="Edit tenant details" onClick={() => openEdit(t)} data-testid={`tenant-edit-${t.id}`}>
+                            <Pencil className="h-4 w-4 text-stone-500" />
+                          </Button>
                           <Button variant="ghost" size="icon" title="New invoice for tenant" onClick={() => navigate(`/invoices/new?tenant=${t.id}`)} data-testid={`tenant-new-invoice-${t.id}`}>
                             <FilePlus2 className="h-4 w-4 text-stone-500" />
                           </Button>
@@ -134,6 +195,40 @@ export default function Tenants() {
           </div>
         )}
       </div>
+
+      <Dialog open={!!editing} onOpenChange={(o) => !o && setEditing(null)}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto bg-white" data-testid="tenant-edit-dialog">
+          <DialogHeader>
+            <DialogTitle className="font-heading">Edit Tenant — {editing?.name}</DialogTitle>
+          </DialogHeader>
+          <p className="text-xs text-stone-500">Updated details auto-fill when you select this tenant while creating an invoice.</p>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {EDIT_FIELDS.map(([k, label, type]) => (
+              <div key={k}>
+                <Label className="text-xs font-semibold uppercase tracking-[0.08em] text-stone-500">{label}</Label>
+                <Input
+                  type={type}
+                  min={type === 'number' ? '0' : undefined}
+                  step={type === 'number' ? '0.01' : undefined}
+                  maxLength={k === 'mobile' ? 10 : undefined}
+                  value={editForm[k] ?? ''}
+                  onChange={setEditField(k)}
+                  data-testid={`edit-${k}`}
+                  className={`mt-1.5 bg-[#FDFCFB] border-[#E6E4E0] focus-visible:ring-terracotta-500 ${editErrors[k] ? 'border-red-400' : ''}`}
+                />
+                {editErrors[k] && <p className="mt-1 text-xs text-red-600" data-testid={`edit-${k}-error`}>{editErrors[k]}</p>}
+              </div>
+            ))}
+          </div>
+          <div className="mt-4 flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setEditing(null)} data-testid="tenant-edit-cancel" className="border-stone-200">Cancel</Button>
+            <Button onClick={handleEditSave} disabled={savingEdit} data-testid="tenant-edit-save" className="bg-terracotta-500 text-white hover:bg-terracotta-600">
+              {savingEdit ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              {savingEdit ? 'Saving…' : 'Save Changes'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <AlertDialog open={!!pendingDelete} onOpenChange={(o) => !o && setPendingDelete(null)}>
         <AlertDialogContent className="bg-white">
